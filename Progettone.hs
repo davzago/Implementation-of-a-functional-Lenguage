@@ -18,6 +18,7 @@ type TiHeap = Heap Node
 data Node = NAp Addr Addr
              | NSupercomb Name [Name] CoreExpr
              | NNum Int
+             | NInd Addr
 
 type TiGlobals = ASSOC Name Addr
 
@@ -92,6 +93,7 @@ step state = dispatch (hLookup heap (head stack))
                    dispatch (NNum n) = numStep state n
                    dispatch (NAp a1 a2) = apStep state a1 a2
                    dispatch (NSupercomb sc args body) = scStep state sc args body
+                   dispatch (NInd a) = (a:drop 1 stack, dump, heap, globals, stats)
 
 numStep :: TiState -> Int -> TiState
 numStep state n = error "Number applied as a function!"
@@ -100,8 +102,10 @@ apStep :: TiState -> Addr -> Addr -> TiState
 apStep (stack, dump, heap, globals, stats) a1 a2 = (a1 : stack, dump, heap, globals, stats)
 
 scStep :: TiState -> Name -> [Name] -> CoreExpr -> TiState
-scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, dump, new_heap, globals, stats)
-                                                                    where new_stack = result_addr : (drop (length arg_names+1) stack)
+scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, dump, new_heap', globals, stats)
+                                                                    where new_stack = result_addr : stack'
+                                                                          new_heap' = hUpdate new_heap a_n (NInd result_addr)
+                                                                          (a_n:stack') = (drop (length arg_names) stack)
                                                                           (new_heap, result_addr) = instantiate body heap env
                                                                           env = arg_bindings ++ globals
                                                                           arg_bindings = zip arg_names (getargs heap stack)
@@ -165,6 +169,8 @@ showNode (NAp a1 a2) = iConcat [ iStr "NAp ", showAddr a1,
                                  iStr " ", showAddr a2 ]
 showNode (NSupercomb name args body) = iStr ("NSupercomb " ++ name)
 showNode (NNum n) = iAppend (iStr "NNum ") (iNum n)
+showNode (NInd a) = iAppend (iStr "NInd ") (showFWAddr a)
+
 
 showAddr :: Addr -> Iseq
 showAddr addr = iStr (show addr)
@@ -273,7 +279,11 @@ fst (snd (snd (snd a))) ;
 main = f 3 4-}
 
 {-"main = letrec a = pair x b ; b = pair y a in fst (snd (snd (snd a)))"-}
-
+{-
 f x y = x+y
 ciao x = f x 5
 main = ciao 5
+
+
+id x = x ; main = twice twice id 3
+-}
