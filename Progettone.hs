@@ -102,11 +102,10 @@ apStep :: TiState -> Addr -> Addr -> TiState
 apStep (stack, dump, heap, globals, stats) a1 a2 = (a1 : stack, dump, heap, globals, stats)
 
 scStep :: TiState -> Name -> [Name] -> CoreExpr -> TiState
-scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, dump, new_heap', globals, stats)
-                                                                    where new_stack = result_addr : stack'
-                                                                          new_heap' = hUpdate new_heap a_n (NInd result_addr)
+scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, dump, new_heap, globals, stats)
+                                                                    where new_stack = a_n : stack'
+                                                                          new_heap = instantiateAndUpdate body a_n heap env
                                                                           (a_n:stack') = (drop (length arg_names) stack)
-                                                                          (new_heap, result_addr) = instantiate body heap env
                                                                           env = arg_bindings ++ globals
                                                                           arg_bindings = zip arg_names (getargs heap stack)
 
@@ -125,6 +124,7 @@ instantiate (EAp e1 e2) heap env = hAlloc heap2 (NAp a1 a2)
                               (heap2, a2) = instantiate e2 heap1 env
 
 instantiate (EVar v) heap env = (heap, aLookup env v (error ("Undefined name " ++ show v)))
+                              
 
 instantiate (EConstr tag arity) heap env = instantiateConstr tag arity heap env
 instantiate (ELet isrec defs body) heap env = instantiate body heap1 env1
@@ -144,6 +144,26 @@ instantiateLet isrec ((v,expr):defs) body heap env = (heap2, env2)
                                                                  where (heap1, env1) = instantiateLet isrec defs body heap (if isrec == NonRecursive then env else env2)
                                                                        env2 = (v,addr) : env --2
                                                                        (heap2, addr) = instantiate expr heap1 env1 --1
+
+instantiateAndUpdate :: CoreExpr --Body of supercombinator
+                        -> Addr -- Address of node to update
+                        -> TiHeap -- Heap before instantiation
+                        -> ASSOC Name Addr -- Associate parameters to addresses
+                        -> TiHeap -- Heap after instantiation
+
+instantiateAndUpdate (ENum n) upd_addr heap env = hUpdate heap upd_addr (NNum n)
+
+instantiateAndUpdate (EAp e1 e2) upd_addr heap env = hUpdate heap2 upd_addr (NAp a1 a2)
+                                                     where (heap1, a1) = instantiate e1 heap env
+                                                           (heap2, a2) = instantiate e2 heap1 env
+
+instantiateAndUpdate (EVar v) upd_addr heap env = hUpdate heap upd_addr (NInd (aLookup env v (error ("Undefined name " ++ show v))))
+
+instantiateAndUpdate (EConstr tag arity) upd_addr heap env = instantiateConstr tag arity heap env
+instantiateAndUpdate (ELet isrec defs body) upd_addr heap env = instantiateAndUpdate body upd_addr heap1 env1
+                                                              where (heap1,env1) = instantiateLet isrec defs body heap env
+
+instantiateAndUpdate (ECase e alts) upd_addr heap env = error "Can’t instantiate case exprs"
 
 --letrec a = b; b= c in a
 --1. instantiate the right-hand side of each of the definitions in defs;
@@ -279,11 +299,9 @@ fst (snd (snd (snd a))) ;
 main = f 3 4-}
 
 {-"main = letrec a = pair x b ; b = pair y a in fst (snd (snd (snd a)))"-}
-{-
-f x y = x+y
-ciao x = f x 5
-main = ciao 5
 
+{- 
+x = 5
+main = x
 
-id x = x ; main = twice twice id 3
 -}
