@@ -10,8 +10,8 @@ type TiStack = [Addr]
 
 --type Addr = Int
 
-data TiDump = DummyTiDump
-initialTiDump = DummyTiDump
+type TiDump = [TiStack]
+initialTiDump = []
 
 type TiHeap = Heap Node
 
@@ -19,6 +19,9 @@ data Node = NAp Addr Addr
              | NSupercomb Name [Name] CoreExpr
              | NNum Int
              | NInd Addr
+             | NPrim Name Primitive
+
+data Primitive = Neg | Add | Sub | Mul | Div
 
 type TiGlobals = ASSOC Name Addr
 
@@ -51,6 +54,9 @@ preludeDefs = [ ("I", ["x"], EVar "x"),
 
 extraPreludeDefs = []
 
+primitives :: ASSOC Name Primitive
+primitives = [ ("negate", Neg), ("+", Add), ("-", Sub), ("*", Mul), ("/", Div)]
+
 compile :: CoreProgram -> TiState
 compile program = (initial_stack, initialTiDump, initial_heap, globals, tiStatInitial)
                     where sc_defs = program ++ preludeDefs ++ extraPreludeDefs
@@ -63,8 +69,16 @@ allocateSc heap (name, args, body) = (heap', (name, addr))
                 where
                      (heap', addr) = hAlloc heap (NSupercomb name args body)
 
+allocatePrim :: TiHeap -> (Name, Primitive) -> (TiHeap, (Name, Addr))
+allocatePrim heap (name, prim) = (heap', (name, addr))
+                               where
+                                    (heap', addr) = hAlloc heap (NPrim name prim)
+
 buildInitialHeap :: [CoreScDefn] -> (TiHeap, TiGlobals)
-buildInitialHeap sc_defs = mapAccuml allocateSc hInitial sc_defs
+buildInitialHeap sc_defs = (heap2, sc_addrs ++ prim_addrs)
+                            where
+                              (heap1, sc_addrs) = mapAccuml allocateSc hInitial sc_defs
+                              (heap2, prim_addrs) = mapAccuml allocatePrim heap1 primitives                              
 
 eval :: TiState -> [TiState]
 eval state = state : rest_states
@@ -79,7 +93,8 @@ doAdmin state = applyToStats tiStatIncSteps state
 
 
 tiFinal :: TiState -> Bool
-tiFinal ([sole_addr], dump, heap, globals, stats) = isDataNode (hLookup heap sole_addr)
+tiFinal ([sole_addr], [], heap, globals, stats) = isDataNode (hLookup heap sole_addr)
+tiFinal ([sole_addr], dump, heap, globals, stats) = False
 tiFinal ([], dump, heap, globals, stats) = error "Empty stack!"
 tiFinal state = False -- Stack contains more than one item
 
@@ -91,15 +106,24 @@ step :: TiState -> TiState
 step state = dispatch (hLookup heap (head stack))
              where (stack, dump, heap, globals, stats) = state
                    dispatch (NNum n) = numStep state n
+                   --dispatch (NAp a1 (NInd a3)) = (stack, dump, hUpdate heap (head stack) (NAp a1 a3), globals, stats)
                    dispatch (NAp a1 a2) = apStep state a1 a2
                    dispatch (NSupercomb sc args body) = scStep state sc args body
                    dispatch (NInd a) = (a:drop 1 stack, dump, heap, globals, stats)
+                   dispatch (NPrim nm pr) = primStep state pr
 
 numStep :: TiState -> Int -> TiState
-numStep state n = error "Number applied as a function!"
+numStep (s1:s2:stack, dump, heap, globals, stats) _ = error "Stack contains mor than one element"
+numStep (stack, [], heap, globals, stats) _ = error "Empty dump!"
+numStep (a:[], (s:dump), heap, globals, stats) _ = (s, dump, heap, globals, stats)  --error "Number applied as a function!"
 
 apStep :: TiState -> Addr -> Addr -> TiState
-apStep (stack, dump, heap, globals, stats) a1 a2 = (a1 : stack, dump, heap, globals, stats)
+apStep (stack, dump, heap, globals, stats) a1 a2 = gnammy node 
+                                                   where
+                                                         gnammy (NInd a3) = (stack, dump, (hUpdate heap (head stack) (NAp a1 a3)), globals, stats)
+                                                         gnammy node = (a1 : stack, dump, heap, globals, stats)
+                                                         node = hLookup heap a2
+
 
 scStep :: TiState -> Name -> [Name] -> CoreExpr -> TiState
 scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, dump, new_heap, globals, stats)
@@ -108,6 +132,16 @@ scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, 
                                                                           (a_n:stack') = (drop (length arg_names) stack)
                                                                           env = arg_bindings ++ globals
                                                                           arg_bindings = zip arg_names (getargs heap stack)
+primStep :: TiState -> Primitive -> TiState
+primStep state Neg = primNeg state
+
+primNeg :: TiState -> TiState
+primNeg ((a:a1:stack), dump, heap, globals, stats) | isDataNode node = ((a1:stack), dump, hUpdate heap a1 (neg node), globals, stats)
+                                                   | otherwise       = ((addr:[]), (a1:stack):dump, heap, globals, stats)
+                                                     where 
+                                                           node = hLookup heap addr
+                                                           [addr] = getargs heap [a1] -- ritorna più di un solo elemento!?
+                                                           neg (NNum n) = NNum (-n)
 
 -- now getargs since getArgs conflicts with Gofer standard.prelude
 getargs :: TiHeap -> TiStack -> [Addr]
@@ -124,7 +158,6 @@ instantiate (EAp e1 e2) heap env = hAlloc heap2 (NAp a1 a2)
                               (heap2, a2) = instantiate e2 heap1 env
 
 instantiate (EVar v) heap env = (heap, aLookup env v (error ("Undefined name " ++ show v)))
-                              
 
 instantiate (EConstr tag arity) heap env = instantiateConstr tag arity heap env
 instantiate (ELet isrec defs body) heap env = instantiate body heap1 env1
@@ -190,6 +223,7 @@ showNode (NAp a1 a2) = iConcat [ iStr "NAp ", showAddr a1,
 showNode (NSupercomb name args body) = iStr ("NSupercomb " ++ name)
 showNode (NNum n) = iAppend (iStr "NNum ") (iNum n)
 showNode (NInd a) = iAppend (iStr "NInd ") (showFWAddr a)
+showNode (NPrim nm Neg) = iAppend (iStr "NPrim ") (iStr nm)
 
 
 showAddr :: Addr -> Iseq
@@ -304,4 +338,6 @@ main = f 3 4-}
 x = 5
 main = x
 
+NPrim Add
+a:b:a1:[] d h[a:NPrim Add; a1:NAp b c; b:NAp a d]
 -}
