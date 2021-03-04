@@ -15,13 +15,17 @@ initialTiDump = []
 
 type TiHeap = Heap Node
 
+type Tag = Int
+type Arity = Int
+
 data Node = NAp Addr Addr
              | NSupercomb Name [Name] CoreExpr
              | NNum Int
              | NInd Addr
              | NPrim Name Primitive
+             | NData Int [Addr]
 
-data Primitive = Neg | Add | Sub | Mul | Div
+data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity
 
 type TiGlobals = ASSOC Name Addr
 
@@ -74,7 +78,7 @@ allocatePrim heap (name, prim) = (heap', (name, addr))
                                where
                                     (heap', addr) = hAlloc heap (NPrim name prim)
 
-buildInitialHeap :: [CoreScDefn] -> (TiHeap, TiGlobals)
+buildInitialHeap ::     [CoreScDefn] -> (TiHeap, TiGlobals)
 buildInitialHeap sc_defs = (heap2, sc_addrs ++ prim_addrs)
                             where
                               (heap1, sc_addrs) = mapAccuml allocateSc hInitial sc_defs
@@ -134,14 +138,37 @@ scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, 
                                                                           arg_bindings = zip arg_names (getargs heap stack)
 primStep :: TiState -> Primitive -> TiState
 primStep state Neg = primNeg state
+primStep state Add = primArith state (+)
+primStep state Sub = primArith state (-)
+primStep state Mul = primArith state (*)
+primStep state Div = primArith state (div)
+primStep state (PrimConstr t ar) = primConstr state (PrimConstr t ar)
+
+primConstr :: TiState -> Primitive -> TiState
+primConstr (stack, dump, heap, globals, stats) (PrimConstr t ar) | length(addrs) == ar = ((drop ar stack), dump, heap', globals, stats)
+                                                                 | otherwise = error "not enough arguments"
+                                                                   where 
+                                                                        (heap',addr) = hAlloc heap (NData t addrs)
+                                                                        addrs = getargs heap stack   
 
 primNeg :: TiState -> TiState
 primNeg ((a:a1:stack), dump, heap, globals, stats) | isDataNode node = ((a1:stack), dump, hUpdate heap a1 (neg node), globals, stats)
                                                    | otherwise       = ((addr:[]), (a1:stack):dump, heap, globals, stats)
                                                      where 
                                                            node = hLookup heap addr
-                                                           [addr] = getargs heap [a1] -- ritorna più di un solo elemento!?
+                                                           [addr] = getargs heap (a:a1:stack) -- ritorna più di un solo elemento!?
                                                            neg (NNum n) = NNum (-n)
+
+primArith :: TiState -> (Int -> Int -> Int) -> TiState
+primArith ((a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && isDataNode node2 = ((a2:stack), dump, hUpdate heap a2 (NNum (f (num node1) (num node2))), globals, stats)
+                                                          | not (isDataNode node1) = ((addr1:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                          | not (isDataNode node2) = ((addr2:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                            where 
+                                                                  node1 = hLookup heap addr1
+                                                                  node2 = hLookup heap addr2
+                                                                  [addr1,addr2] = getargs heap (a:a1:a2:stack)
+                                                                  num (NNum n) = n
+
 
 -- now getargs since getArgs conflicts with Gofer standard.prelude
 getargs :: TiHeap -> TiStack -> [Addr]
@@ -164,7 +191,7 @@ instantiate (ELet isrec defs body) heap env = instantiate body heap1 env1
                                              where (heap1,env1) = instantiateLet isrec defs body heap env
 instantiate (ECase e alts) heap env = error "Can’t instantiate case exprs"
 
-instantiateConstr tag arity heap env = error "Can’t instantiate constructors yet"
+instantiateConstr tag arity heap env = hAlloc heap (NPrim "Pack" (PrimConstr tag arity))
 {-
 instantiateLet isrec [] body heap env = instantiate body heap env --3
 instantiateLet isrec ((v,expr):defs) body heap env = instantiateLet isrec defs body heap1 env1
@@ -192,7 +219,7 @@ instantiateAndUpdate (EAp e1 e2) upd_addr heap env = hUpdate heap2 upd_addr (NAp
 
 instantiateAndUpdate (EVar v) upd_addr heap env = hUpdate heap upd_addr (NInd (aLookup env v (error ("Undefined name " ++ show v))))
 
-instantiateAndUpdate (EConstr tag arity) upd_addr heap env = instantiateConstr tag arity heap env
+--instantiateAndUpdate (EConstr tag arity) upd_addr heap env = instantiateConstr tag arity heap env
 instantiateAndUpdate (ELet isrec defs body) upd_addr heap env = instantiateAndUpdate body upd_addr heap1 env1
                                                               where (heap1,env1) = instantiateLet isrec defs body heap env
 
@@ -223,7 +250,7 @@ showNode (NAp a1 a2) = iConcat [ iStr "NAp ", showAddr a1,
 showNode (NSupercomb name args body) = iStr ("NSupercomb " ++ name)
 showNode (NNum n) = iAppend (iStr "NNum ") (iNum n)
 showNode (NInd a) = iAppend (iStr "NInd ") (showFWAddr a)
-showNode (NPrim nm Neg) = iAppend (iStr "NPrim ") (iStr nm)
+showNode (NPrim nm _) = iAppend (iStr "NPrim ") (iStr nm)
 
 
 showAddr :: Addr -> Iseq
