@@ -45,10 +45,8 @@ parseExpr = parseLet <|> parseLetrec <|> parseCase <|> parseLam <|> parseExpr1
 
 parseAExpr :: Parser (Expr Name)
 parseAExpr = do parseKeyword
-                do e <- parseVar
-                   return (EVar e)
-                 <|> do x <- natural
-                        return (ENum x)
+                do x <- natural
+                   return (ENum x)
                  <|> do symbol "Pack{"
                         n <- natural
                         symbol ","
@@ -59,6 +57,8 @@ parseAExpr = do parseKeyword
                         e <- parseExpr
                         symbol ")"
                         return e
+                 <|> do e <- parseVar
+                        return (EVar e)
                  <|> empty
                 
 parseLet :: Parser (Expr Name)

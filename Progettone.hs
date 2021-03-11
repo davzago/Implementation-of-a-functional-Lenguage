@@ -25,7 +25,14 @@ data Node = NAp Addr Addr
              | NPrim Name Primitive
              | NData Int [Addr]
 
-data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity
+data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity 
+                | If | Greater | GreaterEq | Less | LessEq | Eq | NotEq 
+                | PrimCasePair  deriving Show
+
+{-data Boolean = Falsez | Truez
+
+Falsez = Pack{1,0}
+Truez = Pack{2,0}-}
 
 type TiGlobals = ASSOC Name Addr
 
@@ -56,10 +63,30 @@ preludeDefs = [ ("I", ["x"], EVar "x"),
                 ("twice", ["f"], EAp (EAp (EVar "compose") (EVar "f")) (EVar "f")),
                 ("bau",["x","y"],EAp (EAp (EVar "+") (EVar "x")) (EVar "y"))]
 
-extraPreludeDefs = []
+extraPreludeDefs = [("False",[],EConstr 1 0),
+                    ("True",[],EConstr 2 0),
+                    ("&",["x","y"], EAp (EAp (EAp (EVar "if") (EVar "x")) (EVar "y")) (EVar "False")),
+                    ("|",["x","y"], EAp (EAp (EAp (EVar "if") (EVar "x")) (EVar "True")) (EVar "y")),
+                    ("xor", ["x", "y"], EAp (EAp (EAp (EVar "if") (EVar "x")) (EAp (EVar "not") (EVar "y"))) (EVar "y")),
+                    ("not", ["y"], EAp (EAp (EAp (EVar "if") (EVar "y")) (EVar "False")) (EVar "True")),
+                    ("MkPair", [], EConstr 1 2)
+                   ]
 
 primitives :: ASSOC Name Primitive
-primitives = [ ("negate", Neg), ("+", Add), ("-", Sub), ("*", Mul), ("/", Div)]
+primitives = [ ("negate", Neg),
+               ("+", Add),
+               ("-", Sub), 
+               ("*", Mul), 
+               ("/", Div), 
+               ("if", If), 
+               (">", Greater), 
+               (">=",GreaterEq), 
+               ("<",Less), 
+               ("<=",LessEq), 
+               ("==",Eq), 
+               ("/=",NotEq),
+               ("casePair", PrimCasePair)
+             ]
 
 compile :: CoreProgram -> TiState
 compile program = (initial_stack, initialTiDump, initial_heap, globals, tiStatInitial)
@@ -104,7 +131,8 @@ tiFinal state = False -- Stack contains more than one item
 
 isDataNode :: Node -> Bool
 isDataNode (NNum n) = True
-isDataNode node = False
+isDataNode (NData t a) = True
+isDataNode _ = False
 
 step :: TiState -> TiState
 step state = dispatch (hLookup heap (head stack))
@@ -115,11 +143,15 @@ step state = dispatch (hLookup heap (head stack))
                    dispatch (NSupercomb sc args body) = scStep state sc args body
                    dispatch (NInd a) = (a:drop 1 stack, dump, heap, globals, stats)
                    dispatch (NPrim nm pr) = primStep state pr
+                   dispatch (NData _ _) = dataStep state
 
 numStep :: TiState -> Int -> TiState
-numStep (s1:s2:stack, dump, heap, globals, stats) _ = error "Stack contains mor than one element"
+numStep (s1:s2:stack, dump, heap, globals, stats) _ = error "Stack contains more than one element"
 numStep (stack, [], heap, globals, stats) _ = error "Empty dump!"
 numStep (a:[], (s:dump), heap, globals, stats) _ = (s, dump, heap, globals, stats)  --error "Number applied as a function!"
+
+dataStep :: TiState -> TiState
+dataStep ((a:[]), (s:dump), heap, globals, stats) = (s, dump, heap, globals, stats)
 
 apStep :: TiState -> Addr -> Addr -> TiState
 apStep (stack, dump, heap, globals, stats) a1 a2 = gnammy node 
@@ -136,6 +168,8 @@ scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, 
                                                                           (a_n:stack') = (drop (length arg_names) stack)
                                                                           env = arg_bindings ++ globals
                                                                           arg_bindings = zip arg_names (getargs heap stack)
+ 
+
 primStep :: TiState -> Primitive -> TiState
 primStep state Neg = primNeg state
 primStep state Add = primArith state (+)
@@ -143,13 +177,28 @@ primStep state Sub = primArith state (-)
 primStep state Mul = primArith state (*)
 primStep state Div = primArith state (div)
 primStep state (PrimConstr t ar) = primConstr state (PrimConstr t ar)
+primStep state If = primIf state 
+primStep state Greater = primComp state (>)
+primStep state GreaterEq = primComp state (>=)
+primStep state Less = primComp state (<) 
+primStep state LessEq = primComp state (<=)
+primStep state Eq = primComp state (==) 
+primStep state NotEq = primComp state (/=)
+primStep state (PrimCasePair) = primCase state
+
+primCase :: TiState -> TiState
+primCase (a:stack, dump, heap, globals, stats) p f = isDataNode p | f p
+                                                   where node = 
 
 primConstr :: TiState -> Primitive -> TiState
-primConstr (stack, dump, heap, globals, stats) (PrimConstr t ar) | length(addrs) == ar = ((drop ar stack), dump, heap', globals, stats)
+primConstr (stack, dump, heap, globals, stats) (PrimConstr t ar) | length(addrs) == ar = (stack', dump, heap', globals, stats)
                                                                  | otherwise = error "not enough arguments"
                                                                    where 
-                                                                        (heap',addr) = hAlloc heap (NData t addrs)
-                                                                        addrs = getargs heap stack   
+                                                                        heap' = hUpdate heap (head stack') (NData t addrs)
+                                                                        stack' = (drop ar stack)
+                                                                        addrs = take ar (getargs heap stack)
+
+
 
 primNeg :: TiState -> TiState
 primNeg ((a:a1:stack), dump, heap, globals, stats) | isDataNode node = ((a1:stack), dump, hUpdate heap a1 (neg node), globals, stats)
@@ -158,7 +207,17 @@ primNeg ((a:a1:stack), dump, heap, globals, stats) | isDataNode node = ((a1:stac
                                                            node = hLookup heap addr
                                                            [addr] = getargs heap (a:a1:stack) -- ritorna più di un solo elemento!?
                                                            neg (NNum n) = NNum (-n)
-
+                                                           
+primIf :: TiState -> TiState
+primIf ((primif:a1:a2:a3:stack), dump, heap, globals, stats) = case cond of 
+                                                                 (NData 1 []) -> (a_else:stack, dump, hUpdate heap a3 (hLookup heap a_else), globals, stats)
+                                                                 (NData 2 []) -> (a_then:stack, dump, hUpdate heap a3 (hLookup heap a_then), globals, stats)
+                                                                 _            -> (a_cond:[], (primif:a1:a2:a3:stack):dump, heap, globals, stats)
+                                                             where 
+                                                                   cond = hLookup heap a_cond
+                                                                   a_cond: a_then : a_else : [] = getargs heap (primif:a1:a2:a3:[])
+                                                
+{-
 primArith :: TiState -> (Int -> Int -> Int) -> TiState
 primArith ((a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && isDataNode node2 = ((a2:stack), dump, hUpdate heap a2 (NNum (f (num node1) (num node2))), globals, stats)
                                                           | not (isDataNode node1) = ((addr1:[]), (a1:a2:stack):dump, heap, globals, stats)
@@ -168,7 +227,22 @@ primArith ((a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && 
                                                                   node2 = hLookup heap addr2
                                                                   [addr1,addr2] = getargs heap (a:a1:a2:stack)
                                                                   num (NNum n) = n
+-}
 
+primArith :: TiState -> (Int -> Int -> Int) -> TiState
+primArith state f = primDyadic state (\(NNum x) (NNum y) -> NNum (f x y)) 
+                                   
+primComp :: TiState -> (Int -> Int -> Bool) -> TiState
+primComp state f = primDyadic state (\(NNum x) (NNum y) -> if f x y then (NData 2 []) else (NData 1 []))
+                                          
+primDyadic :: TiState -> (Node -> Node -> Node) -> TiState
+primDyadic ((a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && isDataNode node2 = ((a2:stack), dump, hUpdate heap a2 (f node1 node2), globals, stats)
+                                                           | not (isDataNode node1) = ((addr1:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                           | not (isDataNode node2) = ((addr2:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                             where 
+                                                                   node1 = hLookup heap addr1
+                                                                   node2 = hLookup heap addr2
+                                                                   [addr1,addr2] = getargs heap (a:a1:a2:stack)
 
 -- now getargs since getArgs conflicts with Gofer standard.prelude
 getargs :: TiHeap -> TiStack -> [Addr]
@@ -219,7 +293,7 @@ instantiateAndUpdate (EAp e1 e2) upd_addr heap env = hUpdate heap2 upd_addr (NAp
 
 instantiateAndUpdate (EVar v) upd_addr heap env = hUpdate heap upd_addr (NInd (aLookup env v (error ("Undefined name " ++ show v))))
 
---instantiateAndUpdate (EConstr tag arity) upd_addr heap env = instantiateConstr tag arity heap env
+instantiateAndUpdate (EConstr tag arity) upd_addr heap env = hUpdate heap upd_addr (NPrim "Pack" (PrimConstr tag arity))
 instantiateAndUpdate (ELet isrec defs body) upd_addr heap env = instantiateAndUpdate body upd_addr heap1 env1
                                                               where (heap1,env1) = instantiateLet isrec defs body heap env
 
@@ -250,8 +324,8 @@ showNode (NAp a1 a2) = iConcat [ iStr "NAp ", showAddr a1,
 showNode (NSupercomb name args body) = iStr ("NSupercomb " ++ name)
 showNode (NNum n) = iAppend (iStr "NNum ") (iNum n)
 showNode (NInd a) = iAppend (iStr "NInd ") (showFWAddr a)
-showNode (NPrim nm _) = iAppend (iStr "NPrim ") (iStr nm)
-
+showNode (NPrim nm pr) = iAppend (iStr "NPrim ") (iStr nm)
+showNode (NData t addrs) = iAppend (iStr "NData ") (iNum t)
 
 showAddr :: Addr -> Iseq
 showAddr addr = iStr (show addr)
@@ -353,7 +427,7 @@ main = let x = 5; y = 6 in x
 fst p = p K ;
 snd p = p K1 ;
 f x y = letrec
-a = pair x b ;
+a = pair x b ;fst p = p K
 b = pair y a
 in
 fst (snd (snd (snd a))) ;
@@ -367,4 +441,10 @@ main = x
 
 NPrim Add
 a:b:a1:[] d h[a:NPrim Add; a1:NAp b c; b:NAp a d]
+
+[([("main",[],EAp (EAp (EAp (EVar "if") (EAp (EAp (EVar "&") (EVar "True")) (EVar "True"))) (ENum 5)) (ENum 6))],"")]
+"fac n = if (n == 0) 1 (n * fac (n-1)) ; main = fac 3"
+
+mkpair = pack{1,2}
+ciao = mkpair 5 6
 -}
