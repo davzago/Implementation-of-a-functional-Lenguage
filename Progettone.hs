@@ -27,7 +27,7 @@ data Node = NAp Addr Addr
 
 data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity 
                 | If | Greater | GreaterEq | Less | LessEq | Eq | NotEq 
-                | PrimCasePair  deriving Show
+                | PrimCasePair | Abort | PrimCaseList | Stop | Print deriving Show
 
 {-data Boolean = Falsez | Truez
 
@@ -49,10 +49,10 @@ tiStatIncSteps s = s+1
 tiStatGetSteps :: TiStats -> Int
 tiStatGetSteps s = s
 
-type TiState = (TiStack, TiDump, TiHeap, TiGlobals, TiStats)
+type TiState = ([Int], TiStack, TiDump, TiHeap, TiGlobals, TiStats)
 
 applyToStats :: (TiStats -> TiStats) -> TiState -> TiState
-applyToStats stats_fun (stack, dump, heap, sc_defs, stats) = (stack, dump, heap, sc_defs, stats_fun stats)
+applyToStats stats_fun (output, stack, dump, heap, sc_defs, stats) = (output, stack, dump, heap, sc_defs, stats_fun stats)
 
 preludeDefs :: CoreProgram
 preludeDefs = [ ("I", ["x"], EVar "x"),
@@ -61,7 +61,8 @@ preludeDefs = [ ("I", ["x"], EVar "x"),
                 ("S", ["f","g","x"], EAp (EAp (EVar "f") (EVar "x")) (EAp (EVar "g") (EVar "x"))),
                 ("compose", ["f","g","x"], EAp (EVar "f") (EAp (EVar "g") (EVar "x"))),
                 ("twice", ["f"], EAp (EAp (EVar "compose") (EVar "f")) (EVar "f")),
-                ("bau",["x","y"],EAp (EAp (EVar "+") (EVar "x")) (EVar "y"))]
+                ("fst", ["p"], EAp (EAp (EVar "casePair") (EVar "p")) (EVar "K")),
+                ("snd",["p"],EAp (EAp (EVar "casePair") (EVar "p")) (EVar "K1"))]
 
 extraPreludeDefs = [("False",[],EConstr 1 0),
                     ("True",[],EConstr 2 0),
@@ -69,7 +70,13 @@ extraPreludeDefs = [("False",[],EConstr 1 0),
                     ("|",["x","y"], EAp (EAp (EAp (EVar "if") (EVar "x")) (EVar "True")) (EVar "y")),
                     ("xor", ["x", "y"], EAp (EAp (EAp (EVar "if") (EVar "x")) (EAp (EVar "not") (EVar "y"))) (EVar "y")),
                     ("not", ["y"], EAp (EAp (EAp (EVar "if") (EVar "y")) (EVar "False")) (EVar "True")),
-                    ("MkPair", [], EConstr 1 2)
+                    ("MkPair", [], EConstr 1 2),
+                    ("Nil",[], EConstr 1 0),
+                    ("Cons",[], EConstr 2 2),
+                    ("head", ["xs"], EAp (EAp (EAp (EVar "caseList") (EVar "xs")) (EVar "abort")) (EVar "K")),
+                    ("tail", ["xs"], EAp (EAp (EAp (EVar "caseList") (EVar "xs")) (EVar "abort")) (EVar "K1")),
+                    ("printList",["xs"],EAp (EAp (EAp (EVar "caseList") (EVar "xs")) (EVar "stop")) (EVar "printCons")),
+                    ("printCons",["h","t"],EAp (EAp (EVar "print") (EVar "h")) (EAp (EVar "printList") (EVar "t")))
                    ]
 
 primitives :: ASSOC Name Primitive
@@ -85,15 +92,22 @@ primitives = [ ("negate", Neg),
                ("<=",LessEq), 
                ("==",Eq), 
                ("/=",NotEq),
-               ("casePair", PrimCasePair)
+               ("casePair", PrimCasePair),
+               ("abort", Abort),
+               ("caseList", PrimCaseList),
+               ("print", Print),
+               ("stop", Stop)
              ]
 
 compile :: CoreProgram -> TiState
-compile program = (initial_stack, initialTiDump, initial_heap, globals, tiStatInitial)
+compile program = (output, initial_stack, initialTiDump, initial_heap', globals, tiStatInitial)
                     where sc_defs = program ++ preludeDefs ++ extraPreludeDefs
                           (initial_heap, globals) = buildInitialHeap sc_defs
-                          initial_stack = [address_of_main]
+                          initial_stack = [addr]
                           address_of_main = aLookup globals "main" (error "main is not defined")
+                          address_of_print = aLookup globals "printList" (error "print_list is not defined")
+                          (initial_heap', addr) = hAlloc initial_heap (NAp address_of_print address_of_main)
+                          output = []
 
 allocateSc :: TiHeap -> CoreScDefn -> (TiHeap, (Name, Addr))
 allocateSc heap (name, args, body) = (heap', (name, addr))
@@ -124,9 +138,9 @@ doAdmin state = applyToStats tiStatIncSteps state
 
 
 tiFinal :: TiState -> Bool
-tiFinal ([sole_addr], [], heap, globals, stats) = isDataNode (hLookup heap sole_addr)
-tiFinal ([sole_addr], dump, heap, globals, stats) = False
-tiFinal ([], dump, heap, globals, stats) = error "Empty stack!"
+tiFinal (output, [sole_addr], [], heap, globals, stats) = isDataNode (hLookup heap sole_addr)
+tiFinal (output, [sole_addr], dump, heap, globals, stats) = False
+tiFinal (output, [], dump, heap, globals, stats) = True
 tiFinal state = False -- Stack contains more than one item
 
 isDataNode :: Node -> Bool
@@ -136,42 +150,41 @@ isDataNode _ = False
 
 step :: TiState -> TiState
 step state = dispatch (hLookup heap (head stack))
-             where (stack, dump, heap, globals, stats) = state
+             where (output,stack, dump, heap, globals, stats) = state
                    dispatch (NNum n) = numStep state n
-                   --dispatch (NAp a1 (NInd a3)) = (stack, dump, hUpdate heap (head stack) (NAp a1 a3), globals, stats)
                    dispatch (NAp a1 a2) = apStep state a1 a2
                    dispatch (NSupercomb sc args body) = scStep state sc args body
-                   dispatch (NInd a) = (a:drop 1 stack, dump, heap, globals, stats)
+                   dispatch (NInd a) = (output,a:drop 1 stack, dump, heap, globals, stats)
                    dispatch (NPrim nm pr) = primStep state pr
                    dispatch (NData _ _) = dataStep state
 
 numStep :: TiState -> Int -> TiState
-numStep (s1:s2:stack, dump, heap, globals, stats) _ = error "Stack contains more than one element"
-numStep (stack, [], heap, globals, stats) _ = error "Empty dump!"
-numStep (a:[], (s:dump), heap, globals, stats) _ = (s, dump, heap, globals, stats)  --error "Number applied as a function!"
+numStep (output, s1:s2:stack, dump, heap, globals, stats) _ = error "Stack contains more than one element"
+numStep (output, stack, [], heap, globals, stats) _ = error "Empty dump!"
+numStep (output, a:[], (s:dump), heap, globals, stats) _ = (output, s, dump, heap, globals, stats)  --error "Number applied as a function!"
 
 dataStep :: TiState -> TiState
-dataStep ((a:[]), (s:dump), heap, globals, stats) = (s, dump, heap, globals, stats)
+dataStep (output, (a:[]), (s:dump), heap, globals, stats) = (output, s, dump, heap, globals, stats)
 
 apStep :: TiState -> Addr -> Addr -> TiState
-apStep (stack, dump, heap, globals, stats) a1 a2 = gnammy node 
-                                                   where
-                                                         gnammy (NInd a3) = (stack, dump, (hUpdate heap (head stack) (NAp a1 a3)), globals, stats)
-                                                         gnammy node = (a1 : stack, dump, heap, globals, stats)
-                                                         node = hLookup heap a2
+apStep (output, stack, dump, heap, globals, stats) a1 a2 = gnammy node
+                                                         where
+                                                               gnammy (NInd a3) = (output, stack, dump, (hUpdate heap (head stack) (NAp a1 a3)), globals, stats)
+                                                               gnammy _ = (output, a1 : stack, dump, heap, globals, stats)
+                                                               node = hLookup heap a2
 
 
 scStep :: TiState -> Name -> [Name] -> CoreExpr -> TiState
-scStep (stack, dump, heap, globals, stats) sc_name arg_names body = (new_stack, dump, new_heap, globals, stats)
-                                                                    where new_stack = a_n : stack'
-                                                                          new_heap = instantiateAndUpdate body a_n heap env
-                                                                          (a_n:stack') = (drop (length arg_names) stack)
-                                                                          env = arg_bindings ++ globals
-                                                                          arg_bindings = zip arg_names (getargs heap stack)
- 
+scStep (output, stack, dump, heap, globals, stats) sc_name arg_names body = (output, new_stack, dump, new_heap, globals, stats)
+                                                                          where new_stack = a_n : stack'
+                                                                                new_heap = instantiateAndUpdate body a_n heap env
+                                                                                (a_n:stack') = (drop (length arg_names) stack)
+                                                                                env = arg_bindings ++ globals
+                                                                                arg_bindings = zip arg_names (getargs heap stack)
+
 
 primStep :: TiState -> Primitive -> TiState
-primStep state Neg = primNeg state
+primStep state Neg = primNeg state 
 primStep state Add = primArith state (+)
 primStep state Sub = primArith state (-)
 primStep state Mul = primArith state (*)
@@ -184,14 +197,42 @@ primStep state Less = primComp state (<)
 primStep state LessEq = primComp state (<=)
 primStep state Eq = primComp state (==) 
 primStep state NotEq = primComp state (/=)
-primStep state (PrimCasePair) = primCase state
+primStep state (PrimCasePair) = primCasePair state
+primStep state (PrimCaseList) = primCaseList state
+primStep state Abort = error "empty list"
+primStep state Stop = primStop state
+primStep state Print = primPrint state
 
-primCase :: TiState -> TiState
-primCase (a:stack, dump, heap, globals, stats) p f = isDataNode p | f p
-                                                   where node = 
+
+primCasePair :: TiState -> TiState
+primCasePair (output, stack, dump, heap, globals, stats) = case mk of 
+                                                             (NData 1 [a,b]) -> (output, stack', dump, heap'', globals, stats) where 
+                                                                                                                                     heap'' = hUpdate heap' (head stack') (NAp addr b)
+                                                                                                                                     (heap',addr) = hAlloc heap (NAp f_addr a)
+                                                             _               -> (output, [mk_addr], (drop 1 stack):dump, heap, globals, stats)
+                                                         where 
+                                                               mk = hLookup heap mk_addr
+                                                               [mk_addr,f_addr] = getargs heap stack
+
+                                                               stack' = drop 2 stack
+
+primCaseList :: TiState -> TiState
+primCaseList (output, stack, dump, heap, globals, stats) = case pack of
+                                                             (NData 1 []) -> (output, stack', dump, heap', globals, stats) where
+                                                                                                                                 heap' = hUpdate heap (head stack') (hLookup heap base_addr)
+                                                             (NData 2 [a,b]) ->  (output, stack', dump, heap'', globals, stats) where
+                                                                                                                                      heap'' = hUpdate heap' (head stack') (NAp addr b)
+                                                                                                                                      (heap',addr) = hAlloc heap (NAp f_addr a)
+                                                             _ -> (output, [pack_addr], (drop 1 stack):dump, heap, globals, stats)
+                                                         where
+                                                               pack = hLookup heap pack_addr
+                                                               [pack_addr, base_addr, f_addr] = getargs heap stack
+
+                                                               stack' = drop 3 stack
+
 
 primConstr :: TiState -> Primitive -> TiState
-primConstr (stack, dump, heap, globals, stats) (PrimConstr t ar) | length(addrs) == ar = (stack', dump, heap', globals, stats)
+primConstr (output, stack, dump, heap, globals, stats) (PrimConstr t ar) | length(addrs) == ar = (output, stack', dump, heap', globals, stats)
                                                                  | otherwise = error "not enough arguments"
                                                                    where 
                                                                         heap' = hUpdate heap (head stack') (NData t addrs)
@@ -201,21 +242,21 @@ primConstr (stack, dump, heap, globals, stats) (PrimConstr t ar) | length(addrs)
 
 
 primNeg :: TiState -> TiState
-primNeg ((a:a1:stack), dump, heap, globals, stats) | isDataNode node = ((a1:stack), dump, hUpdate heap a1 (neg node), globals, stats)
-                                                   | otherwise       = ((addr:[]), (a1:stack):dump, heap, globals, stats)
+primNeg (output, (a:a1:stack), dump, heap, globals, stats) | isDataNode node = (output, (a1:stack), dump, hUpdate heap a1 (neg node), globals, stats)
+                                                   | otherwise       = (output, (addr:[]), (a1:stack):dump, heap, globals, stats)
                                                      where 
                                                            node = hLookup heap addr
                                                            [addr] = getargs heap (a:a1:stack) -- ritorna più di un solo elemento!?
                                                            neg (NNum n) = NNum (-n)
                                                            
 primIf :: TiState -> TiState
-primIf ((primif:a1:a2:a3:stack), dump, heap, globals, stats) = case cond of 
-                                                                 (NData 1 []) -> (a_else:stack, dump, hUpdate heap a3 (hLookup heap a_else), globals, stats)
-                                                                 (NData 2 []) -> (a_then:stack, dump, hUpdate heap a3 (hLookup heap a_then), globals, stats)
-                                                                 _            -> (a_cond:[], (primif:a1:a2:a3:stack):dump, heap, globals, stats)
-                                                             where 
-                                                                   cond = hLookup heap a_cond
-                                                                   a_cond: a_then : a_else : [] = getargs heap (primif:a1:a2:a3:[])
+primIf (output, (primif:a1:a2:a3:stack), dump, heap, globals, stats) = case cond of 
+                                                                         (NData 1 []) -> (output, a_else:stack, dump, hUpdate heap a3 (hLookup heap a_else), globals, stats)
+                                                                         (NData 2 []) -> (output, a_then:stack, dump, hUpdate heap a3 (hLookup heap a_then), globals, stats)
+                                                                         _            -> (output, a_cond:[], (primif:a1:a2:a3:stack):dump, heap, globals, stats)
+                                                                     where 
+                                                                           cond = hLookup heap a_cond
+                                                                           a_cond: a_then : a_else : [] = getargs heap (primif:a1:a2:a3:[])
                                                 
 {-
 primArith :: TiState -> (Int -> Int -> Int) -> TiState
@@ -236,18 +277,32 @@ primComp :: TiState -> (Int -> Int -> Bool) -> TiState
 primComp state f = primDyadic state (\(NNum x) (NNum y) -> if f x y then (NData 2 []) else (NData 1 []))
                                           
 primDyadic :: TiState -> (Node -> Node -> Node) -> TiState
-primDyadic ((a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && isDataNode node2 = ((a2:stack), dump, hUpdate heap a2 (f node1 node2), globals, stats)
-                                                           | not (isDataNode node1) = ((addr1:[]), (a1:a2:stack):dump, heap, globals, stats)
-                                                           | not (isDataNode node2) = ((addr2:[]), (a1:a2:stack):dump, heap, globals, stats)
-                                                             where 
-                                                                   node1 = hLookup heap addr1
-                                                                   node2 = hLookup heap addr2
-                                                                   [addr1,addr2] = getargs heap (a:a1:a2:stack)
+primDyadic (output, (a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && isDataNode node2 = (output, (a2:stack), dump, hUpdate heap a2 (f node1 node2), globals, stats)
+                                                                   | not (isDataNode node1) = (output, (addr1:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                                   | not (isDataNode node2) = (output, (addr2:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                                   where 
+                                                                         node1 = hLookup heap addr1
+                                                                         node2 = hLookup heap addr2
+                                                                         [addr1,addr2] = getargs heap (a:a1:a2:stack)
+
+primStop :: TiState -> TiState
+primStop (output, (a:[]), [], heap, globals, stats) = (output, [], [], heap, globals, stats)
+primStop (output, (a:[]), dump, heap, globals, stats) = error "dump is not empty when calling stop"
+
+primPrint :: TiState -> TiState
+primPrint (output,(a:a1:a2:[]), [], heap, globals, stats) = case node of -- ⇒
+                                                              NNum n -> (output ++ [n], b2_addr:[], [], heap, globals, stats)
+                                                              _      
+                                                                     | isDataNode node -> error "wrong type for a list member"
+                                                                     | otherwise -> (output, (b1_addr:[]), ([a2]:[]), heap, globals, stats)
+                                                          where node = hLookup heap b1_addr
+                                                                [b1_addr, b2_addr] = getargs heap (a:a1:a2:[])
 
 -- now getargs since getArgs conflicts with Gofer standard.prelude
 getargs :: TiHeap -> TiStack -> [Addr]
 getargs heap (sc:stack) = map get_arg stack
                           where get_arg addr = arg where (NAp fun arg) = hLookup heap addr
+                          
 
 instantiate :: CoreExpr -- Body of supercombinator
                -> TiHeap -- Heap before instantiation
@@ -305,10 +360,10 @@ instantiateAndUpdate (ECase e alts) upd_addr heap env = error "Can’t instantia
 --3. call instantiate passing the augmented environment and the expression body.
 
 showResults :: [TiState] -> [Char]
-showResults states = iDisplay (iConcat [ iLayn (map showState states),showStats (last states)])
+showResults states = iDisplay (iConcat [ iLayn (map showState states), showStats (last states)])
 
 showState :: TiState -> Iseq
-showState (stack, dump, heap, globals, stats) = iConcat [ showStack heap stack, iNewline ]
+showState (output, stack, dump, heap, globals, stats) = iConcat [ showStack heap stack, iNewline ]
 
 showStack :: TiHeap -> TiStack -> Iseq
 showStack heap stack = iConcat [iStr "Stk [",iIndent (iInterleave iNewline (map show_stack_item stack)),iStr " ]"]
@@ -325,7 +380,7 @@ showNode (NSupercomb name args body) = iStr ("NSupercomb " ++ name)
 showNode (NNum n) = iAppend (iStr "NNum ") (iNum n)
 showNode (NInd a) = iAppend (iStr "NInd ") (showFWAddr a)
 showNode (NPrim nm pr) = iAppend (iStr "NPrim ") (iStr nm)
-showNode (NData t addrs) = iAppend (iStr "NData ") (iNum t)
+showNode (NData t addrs) = iConcat [iStr "NData ", (iNum t), iStr " ", (iNum (length addrs))]
 
 showAddr :: Addr -> Iseq
 showAddr addr = iStr (show addr)
@@ -336,7 +391,7 @@ showFWAddr addr = iStr (space1 (4 - length str) ++ str)
                 where str = show addr
 
 showStats :: TiState -> Iseq
-showStats (stack, dump, heap, globals, stats) = iConcat [ iNewline, iNewline, iStr "Total number of steps = ", iNum (tiStatGetSteps stats)]
+showStats (output, stack, dump, heap, globals, stats) = iConcat ([ iNewline, iNewline, iStr "Total number of steps = ", iNum (tiStatGetSteps stats), iNewline, iStr "Main = ["] ++ (map (\n -> iAppend (iNum n) (iStr ",")) output) ++ [iStr "]"])
 
 --showResults (eval (compile (parseProg "main = S K K 3"))) 
 
@@ -447,4 +502,276 @@ a:b:a1:[] d h[a:NPrim Add; a1:NAp b c; b:NAp a d]
 
 mkpair = pack{1,2}
 ciao = mkpair 5 6
+main = fst (snd (fst (MkPair (MkPair 1 (MkPair 2 3)) 4)))
+main = fst (MkPair 5 6)
+
+NPrim casePair
+a:ap1:ap2:stack d h[a: NPirm casePair, ap1: Nap nprim arg, ap2: NAp ap1 arg2]
+getargs stack
+
+NPrim caseList
+a:a1:a2:a3:[] d h[a:Nprim caseList, a1: Nap nprim arg, a2: NAp a1 arg2, a3: Nap a2 arg3]
+
+EAp (EAp (EConstr 1 2) (ENum 5)) (ENum 6))
+pack{1,2} 5 6
+
+Eap (Eap (casePair) (NData)) (f)
+f a b
+
+main = S K K 3
+
+main = fst (snd (fst (MkPair (MkPair 1 (MkPair 2 3)) 4)))
+
+                ("fst", ["p"], EAp (EAp (EVar "casePair") (EVar "p")) (EVar "K1")),
+                ("snd",["p"],EAp (EAp (EVar "casePair") (EVar "p")) (EVar "K1"))]
+
+   1) Stk [   1: NSupercomb main
+            ]
+      
+   2) Stk [   1: NAp    8   41 (NAp 9 40)
+            ]
+      
+   3) Stk [   8: NSupercomb fst
+              1: NAp    8   41 (NAp 9 40)
+            ]
+      
+   4) Stk [   1: NAp   42    4 (NSupercomb K1)
+            ]
+      
+   5) Stk [  42: NAp   29   41 (NAp 9 40)
+              1: NAp   42    4 (NSupercomb K1)
+            ]
+      
+   6) Stk [  29: NPrim casePair
+             42: NAp   29   41 (NAp 9 40)
+              1: NAp   42    4 (NSupercomb K1)
+            ]
+      
+   7) Stk [  41: NAp    9   40 (NAp 8 39)
+            ]
+      
+   8) Stk [   9: NSupercomb snd
+             41: NAp    9   40 (NAp 8 39)
+            ]
+      
+   9) Stk [  41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  10) Stk [  43: NAp   29   40 (NAp 8 39)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  11) Stk [  29: NPrim casePair
+             43: NAp   29   40 (NAp 8 39)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  12) Stk [  40: NAp    8   39 (NAp 37 38)
+            ]
+      
+  13) Stk [   8: NSupercomb fst
+             40: NAp    8   39 (NAp 37 38)
+            ]
+      
+  14) Stk [  40: NAp   44    4 (NSupercomb K1)
+            ]
+      
+  15) Stk [  44: NAp   29   39 (NAp 37 38)
+             40: NAp   44    4 (NSupercomb K1)
+            ]
+      
+  16) Stk [  29: NPrim casePair
+             44: NAp   29   39 (NAp 37 38)
+             40: NAp   44    4 (NSupercomb K1)
+            ]
+      
+  17) Stk [  39: NAp   37   38 (NNum 4)
+            ]
+      
+  18) Stk [  37: NAp   16   36 (NAp 31 35)
+             39: NAp   37   38 (NNum 4)
+            ]
+      
+  19) Stk [  16: NSupercomb MkPair
+             37: NAp   16   36 (NAp 31 35)
+             39: NAp   37   38 (NNum 4)
+            ]
+      
+  20) Stk [  16: NPrim Pack
+             37: NAp   16   36 (NAp 31 35)
+             39: NAp   37   38 (NNum 4)
+            ]
+      
+  21) Stk [  39: NData 1
+            ]
+      
+  22) Stk [  44: NAp   29   39 (NData 1)
+             40: NAp   44    4 (NSupercomb K1)
+            ]
+      
+  23) Stk [  29: NPrim casePair
+             44: NAp   29   39 (NData 1)
+             40: NAp   44    4 (NSupercomb K1)
+            ]
+      
+  24) Stk [  40: NAp   45   38 (NNum 4)
+            ]
+      
+  25) Stk [  45: NAp    4   36 (NAp 31 35)
+             40: NAp   45   38 (NNum 4)
+            ]
+      
+  26) Stk [   4: NSupercomb K1
+             45: NAp    4   36 (NAp 31 35)
+             40: NAp   45   38 (NNum 4)
+            ]
+      
+  27) Stk [  40: NInd   38
+            ]
+      
+  28) Stk [  38: NNum 4
+            ]
+      
+  29) Stk [  43: NAp   29   40 (NInd   38)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  30) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  31) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  32) Stk [  38: NNum 4
+            ]
+      
+  33) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  34) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  35) Stk [  38: NNum 4
+            ]
+      
+  36) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  37) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  38) Stk [  38: NNum 4
+            ]
+      
+  39) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  40) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  41) Stk [  38: NNum 4
+            ]
+      
+  42) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  43) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  44) Stk [  38: NNum 4
+            ]
+      
+  45) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  46) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  47) Stk [  38: NNum 4
+            ]
+      
+  48) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  49) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  50) Stk [  38: NNum 4
+            ]
+      
+  51) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  52) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  53) Stk [  38: NNum 4
+            ]
+      
+  54) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  55) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  56) Stk [  38: NNum 4
+            ]
+      
+  57) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  58) Stk [  29: NPrim casePair
+             43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  59) Stk [  38: NNum 4
+            ]
+      
+  60) Stk [  43: NAp   29   38 (NNum 4)
+             41: NAp   43    4 (NSupercomb K1)
+            ]
+      
+  61) Stk [  29: NPrim casePair
+             43: N^CApInterrupted.
+*Main> 
+
+
+Pack{2,2} 1 2 3 4 5 6
+NData 5 [1,2,3,4,5,6]
+
+NData 2 [1,x]
+NData 2 [2,x1]
+NDat
+
+listone = Pack{2,2} 1 (Pack{2,2} 2 (Pack{2,2} 3 Pack{1,0}))
+
 -}

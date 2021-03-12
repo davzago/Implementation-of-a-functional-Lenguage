@@ -185,6 +185,6 @@ parseExpr6 = do (a:as) <- some parseAExpr
                 return (foldl (\x y -> EAp x y) a as)
 
 parseKeyword :: Parser String
-parseKeyword = P(\inp -> case parse (symbol "in" <|> symbol "case" <|> symbol "let" <|> symbol "letrec" <|> symbol "of" <|> empty) inp of
+parseKeyword = P(\inp -> case parse (symbol "in" <|> symbol "case " <|> symbol "let" <|> symbol "letrec" <|> symbol "of" <|> empty) inp of
                             [] -> [("",inp)]
                             [(v,out)] -> [])
