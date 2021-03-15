@@ -145,16 +145,16 @@ gc (output, stack, dump, heap, globals, stats) = (output, stack, dump, cleaned_h
                                                      marked_heap = foldl markFrom heap addrs 
                                                      cleaned_heap = scanHeap marked_heap
 
-markFrom :: TiHeap -> Addr -> TiHeap
+markFrom :: TiHeap -> Addr -> (TiHeap,Addr)
 markFrom heap addr = case node of
-                       (NMarked n) -> heap
-                       (NAp a1 a2) ->  heap'' where heap' = markFrom heap a1
-                                                    heap'' = markFrom heap' a2
-                                                    mark''' = hUpdate heap'' addr (NMarked node)
-                       (NInd a) -> heap'' where heap' = markFrom heap a
-                                                heap'' = hUpdate heap' addr (NMarked node)
-                       (NData _ addrs) -> hUpdate (foldl markFrom heap addrs) addr (NMarked node)
-                       nod -> hUpdate heap addr (NMarked nod)
+                       (NMarked n) -> (heap,addr)
+                       (NAp a1 a2) ->  (heap''',addr) where (heap',banana) = markFrom heap a1
+                                                     (heap'',banana2) = markFrom heap' a2
+                                                     heap''' = hUpdate heap'' addr (NMarked (NAp banana banana2))
+                       (NInd a) -> (heap'', bananino) where (heap',bananino) = markFrom heap a
+                                                --heap'' = hUpdate heap' addr (NMarked node)
+                       (NData _ addrs) -> (hUpdate (foldl markFrom heap addrs) addr (NMarked node), addr)
+                       nod -> (hUpdate heap addr (NMarked nod),addr)
                    where node = hLookup heap addr
 
 scanHeap :: TiHeap -> TiHeap
@@ -163,24 +163,34 @@ scanHeap heap = foldl free heap xs
 
 free :: TiHeap -> (Addr, Node) -> TiHeap
 free heap x = case x of
-                  (addr, NMarked n) -> hUpdate heap addr n 
+                  (addr, NMarked n) -> hUpdate heap addr n
                   (addr, _) -> hFree heap addr
 
 findRoots :: TiStack -> TiDump -> TiGlobals -> [Addr]
 findRoots stack dump globals = findStackRoots stack ++ findDumpRoots dump ++ findGlobalRoots globals
 
-findStackRoots :: TiStack -> [Addr]
-findStacKRoots [] = []
-findStackRoots (x:[]) = [x]
-findStackRoots (x:xs) = findStackRoots xs
+markFromStack :: TiHeap -> TiStack -> (TiHeap,TiStack)--findStackRoots stack = stack
+markFromStack heap [] = (heap,[]) 
+markFromStack heap (x:[]) = 
+                          where (heap',addr) = markFrom heap x
+markFromStack heap (x:xs) =  (heap',x:stack')
+                          where (heap',stack') = markFromStack heap xs
 
-findDumpRoots :: TiDump -> [Addr]
-findDumpRoots [] = []
-findDumpRoots (x:xs) = (findStackRoots x) ++ (findDumpRoots xs)
+markFromDump :: TiHeap -> TiDump -> (TiHeap,TiDump)
+markFromDump dump = foldr (++) [] dump
 
-findGlobalRoots :: TiGlobals -> [Addr]
-findGlobalRoots [] = []
-findGlobalRoots ((nm, addr) : xs) = addr : (findGlobalRoots xs)
+markFromGlobals :: TiHeap -> TiGlobals -> (TiHeap,TiGlobals)
+markFromGlobals [] = []
+markFromGlobals ((nm, addr) : xs) = addr : (findGlobalRoots xs)
+
+remove_duplicates :: Eq a => [a] -> [a]
+remove_duplicates [] = []
+remove_duplicates (x:xs) = x: (remove_duplicates (confronto x xs))
+
+confronto :: Eq a => a -> [a] -> [a]
+confronto _ [] = []
+confronto y (x:xs) | y == x    = confronto y xs
+                   | otherwise = x: (confronto y xs)
 
 tiFinal :: TiState -> Bool
 tiFinal (output, [sole_addr], [], heap, globals, stats) = isDataNode (hLookup heap sole_addr)
@@ -229,7 +239,7 @@ scStep (output, stack, dump, heap, globals, stats) sc_name arg_names body = (out
 
 
 primStep :: TiState -> Primitive -> TiState
-primStep state Neg = primNeg state 
+primStep state Neg = primNeg state
 primStep state Add = primArith state (+)
 primStep state Sub = primArith state (-)
 primStep state Mul = primArith state (*)
@@ -288,11 +298,11 @@ primConstr (output, stack, dump, heap, globals, stats) (PrimConstr t ar) | lengt
 
 primNeg :: TiState -> TiState
 primNeg (output, (a:a1:stack), dump, heap, globals, stats) | isDataNode node = (output, (a1:stack), dump, hUpdate heap a1 (neg node), globals, stats)
-                                                   | otherwise       = (output, (addr:[]), (a1:stack):dump, heap, globals, stats)
-                                                     where 
-                                                           node = hLookup heap addr
-                                                           [addr] = getargs heap (a:a1:stack) -- ritorna più di un solo elemento!?
-                                                           neg (NNum n) = NNum (-n)
+                                                           | otherwise       = (output, (addr:[]), (a1:stack):dump, heap, globals, stats)
+                                                           where 
+                                                                 node = hLookup heap addr
+                                                                 [addr] = getargs heap (a:a1:stack) -- ritorna più di un solo elemento!?
+                                                                 neg (NNum n) = NNum (-n)
                                                            
 primIf :: TiState -> TiState
 primIf (output, (primif:a1:a2:a3:stack), dump, heap, globals, stats) = case cond of 
