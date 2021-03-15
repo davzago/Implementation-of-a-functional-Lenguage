@@ -24,6 +24,7 @@ data Node = NAp Addr Addr
              | NInd Addr
              | NPrim Name Primitive
              | NData Int [Addr]
+             | NMarked Node
 
 data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity 
                 | If | Greater | GreaterEq | Less | LessEq | Eq | NotEq 
@@ -119,7 +120,7 @@ allocatePrim heap (name, prim) = (heap', (name, addr))
                                where
                                     (heap', addr) = hAlloc heap (NPrim name prim)
 
-buildInitialHeap ::     [CoreScDefn] -> (TiHeap, TiGlobals)
+buildInitialHeap :: [CoreScDefn] -> (TiHeap, TiGlobals)
 buildInitialHeap sc_defs = (heap2, sc_addrs ++ prim_addrs)
                             where
                               (heap1, sc_addrs) = mapAccuml allocateSc hInitial sc_defs
@@ -133,9 +134,53 @@ eval state = state : rest_states
              next_states = doAdmin (step state)
 
 doAdmin :: TiState -> TiState
-doAdmin state = applyToStats tiStatIncSteps state
+doAdmin state | hSize heap > 40 = applyToStats tiStatIncSteps (gc state)
+              | otherwise = applyToStats tiStatIncSteps state
+              where (_, _, _, heap, _, _) = state
+              
+gc :: TiState -> TiState
+gc (output, stack, dump, heap, globals, stats) = (output, stack, dump, cleaned_heap, globals, stats)
+                                               where 
+                                                     addrs = findRoots stack dump globals
+                                                     marked_heap = foldl markFrom heap addrs 
+                                                     cleaned_heap = scanHeap marked_heap
 
+markFrom :: TiHeap -> Addr -> TiHeap
+markFrom heap addr = case node of
+                       (NMarked n) -> heap
+                       (NAp a1 a2) ->  heap'' where heap' = markFrom heap a1
+                                                    heap'' = markFrom heap' a2
+                                                    mark''' = hUpdate heap'' addr (NMarked node)
+                       (NInd a) -> heap'' where heap' = markFrom heap a
+                                                heap'' = hUpdate heap' addr (NMarked node)
+                       (NData _ addrs) -> hUpdate (foldl markFrom heap addrs) addr (NMarked node)
+                       nod -> hUpdate heap addr (NMarked nod)
+                   where node = hLookup heap addr
 
+scanHeap :: TiHeap -> TiHeap
+scanHeap heap = foldl free heap xs
+              where (_,_,xs) = heap
+
+free :: TiHeap -> (Addr, Node) -> TiHeap
+free heap x = case x of
+                  (addr, NMarked n) -> hUpdate heap addr n 
+                  (addr, _) -> hFree heap addr
+
+findRoots :: TiStack -> TiDump -> TiGlobals -> [Addr]
+findRoots stack dump globals = findStackRoots stack ++ findDumpRoots dump ++ findGlobalRoots globals
+
+findStackRoots :: TiStack -> [Addr]
+findStacKRoots [] = []
+findStackRoots (x:[]) = [x]
+findStackRoots (x:xs) = findStackRoots xs
+
+findDumpRoots :: TiDump -> [Addr]
+findDumpRoots [] = []
+findDumpRoots (x:xs) = (findStackRoots x) ++ (findDumpRoots xs)
+
+findGlobalRoots :: TiGlobals -> [Addr]
+findGlobalRoots [] = []
+findGlobalRoots ((nm, addr) : xs) = addr : (findGlobalRoots xs)
 
 tiFinal :: TiState -> Bool
 tiFinal (output, [sole_addr], [], heap, globals, stats) = isDataNode (hLookup heap sole_addr)
@@ -386,7 +431,6 @@ showAddr :: Addr -> Iseq
 showAddr addr = iStr (show addr)
 
 showFWAddr :: Addr -> Iseq
--- Show address in field of width 4
 showFWAddr addr = iStr (space1 (4 - length str) ++ str)
                 where str = show addr
 
