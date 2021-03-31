@@ -149,8 +149,8 @@ markFrom :: TiHeap -> Addr -> (TiHeap,Addr)
 markFrom heap addr = case node of
                        (NMarked n) -> (heap,addr)
                        (NAp a1 a2) ->  (heap''',addr) where (heap',banana) = markFrom heap a1
-                                                     (heap'',banana2) = markFrom heap' a2
-                                                     heap''' = hUpdate heap'' addr (NMarked (NAp banana banana2))
+                                                            (heap'',banana2) = markFrom heap' a2
+                                                            heap''' = hUpdate heap'' addr (NMarked (NAp banana banana2))
                        (NInd a) -> (heap'', bananino) where (heap',bananino) = markFrom heap a
                                                 --heap'' = hUpdate heap' addr (NMarked node)
                        (NData _ addrs) -> (hUpdate (foldl markFrom heap addrs) addr (NMarked node), addr)
@@ -170,11 +170,7 @@ findRoots :: TiStack -> TiDump -> TiGlobals -> [Addr]
 findRoots stack dump globals = findStackRoots stack ++ findDumpRoots dump ++ findGlobalRoots globals
 
 markFromStack :: TiHeap -> TiStack -> (TiHeap,TiStack)--findStackRoots stack = stack
-markFromStack heap [] = (heap,[]) 
-markFromStack heap (x:[]) = 
-                          where (heap',addr) = markFrom heap x
-markFromStack heap (x:xs) =  (heap',x:stack')
-                          where (heap',stack') = markFromStack heap xs
+markFromStack heap stack = mapAccuml markFrom heap stack
 
 markFromDump :: TiHeap -> TiDump -> (TiHeap,TiDump)
 markFromDump dump = foldr (++) [] dump
