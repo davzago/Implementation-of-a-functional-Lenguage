@@ -134,27 +134,33 @@ eval state = state : rest_states
              next_states = doAdmin (step state)
 
 doAdmin :: TiState -> TiState
-doAdmin state | hSize heap > 40 = applyToStats tiStatIncSteps (gc state)
+doAdmin state | hSize heap > 10 = applyToStats tiStatIncSteps (gc state)
               | otherwise = applyToStats tiStatIncSteps state
               where (_, _, _, heap, _, _) = state
               
 gc :: TiState -> TiState
-gc (output, stack, dump, heap, globals, stats) = (output, stack, dump, cleaned_heap, globals, stats)
+gc (output, stack, dump, heap, globals, stats) = (output, stack', dump', cleaned_heap, globals', stats)
                                                where 
+                                                     (heap', stack') = markFromStack heap stack
+                                                     (heap'', dump') = markFromDump heap' dump
+                                                     (heap''', globals') = markFromGlobals heap'' globals
+                                                     cleaned_heap = scanHeap heap'''
+                                               {--where 
                                                      addrs = findRoots stack dump globals
                                                      marked_heap = foldl markFrom heap addrs 
                                                      cleaned_heap = scanHeap marked_heap
-
+old version--}
 markFrom :: TiHeap -> Addr -> (TiHeap,Addr)
 markFrom heap addr = case node of
                        (NMarked n) -> (heap,addr)
-                       (NAp a1 a2) ->  (heap''',addr) where (heap',banana) = markFrom heap a1
-                                                            (heap'',banana2) = markFrom heap' a2
-                                                            heap''' = hUpdate heap'' addr (NMarked (NAp banana banana2))
-                       (NInd a) -> (heap'', bananino) where (heap',bananino) = markFrom heap a
-                                                --heap'' = hUpdate heap' addr (NMarked node)
-                       (NData _ addrs) -> (hUpdate (foldl markFrom heap addrs) addr (NMarked node), addr)
-                       nod -> (hUpdate heap addr (NMarked nod),addr)
+                       (NAp a1 a2) ->  (heap''',addr) where (heap',addr1) = markFrom heap a1
+                                                            (heap'',addr2) = markFrom heap' a2
+                                                            heap''' = hUpdate heap'' addr (NMarked (NAp addr1 addr2))
+                       (NInd a) -> markFrom heap a
+                                                            --heap'' = hUpdate heap' addr (NMarked node)
+                       (NData n addrs) -> (marked_heap, addr) where (heap',addrs') = mapAccuml markFrom heap addrs
+                                                                    marked_heap = hUpdate heap' addr (NMarked (NData n addrs'))--(hUpdate (foldl markFrom heap addrs) addr (NMarked node), addr)
+                       nod -> (hUpdate heap addr (NMarked nod), addr)
                    where node = hLookup heap addr
 
 scanHeap :: TiHeap -> TiHeap
@@ -166,18 +172,19 @@ free heap x = case x of
                   (addr, NMarked n) -> hUpdate heap addr n
                   (addr, _) -> hFree heap addr
 
-findRoots :: TiStack -> TiDump -> TiGlobals -> [Addr]
-findRoots stack dump globals = findStackRoots stack ++ findDumpRoots dump ++ findGlobalRoots globals
+--findRoots :: TiStack -> TiDump -> TiGlobals -> [Addr]
+--findRoots stack dump globals = findStackRoots stack ++ findDumpRoots dump ++ findGlobalRoots globals
 
 markFromStack :: TiHeap -> TiStack -> (TiHeap,TiStack)--findStackRoots stack = stack
 markFromStack heap stack = mapAccuml markFrom heap stack
 
 markFromDump :: TiHeap -> TiDump -> (TiHeap,TiDump)
-markFromDump dump = foldr (++) [] dump
+markFromDump heap dump = mapAccuml markFromStack heap dump
 
 markFromGlobals :: TiHeap -> TiGlobals -> (TiHeap,TiGlobals)
-markFromGlobals [] = []
-markFromGlobals ((nm, addr) : xs) = addr : (findGlobalRoots xs)
+markFromGlobals heap globals = mapAccuml markGlobal heap globals
+                               where
+                                 markGlobal h (n, a) = let (h', a') = markFrom h a in (h', (n, a'))
 
 remove_duplicates :: Eq a => [a] -> [a]
 remove_duplicates [] = []
@@ -274,7 +281,8 @@ primCaseList (output, stack, dump, heap, globals, stats) = case pack of
                                                              (NData 2 [a,b]) ->  (output, stack', dump, heap'', globals, stats) where
                                                                                                                                       heap'' = hUpdate heap' (head stack') (NAp addr b)
                                                                                                                                       (heap',addr) = hAlloc heap (NAp f_addr a)
-                                                             _ -> (output, [pack_addr], (drop 1 stack):dump, heap, globals, stats)
+                                                             _  | isDataNode pack -> error "Wrong type for caseList"
+                                                                | otherwise -> (output, [pack_addr], (drop 1 stack):dump, heap, globals, stats)
                                                          where
                                                                pack = hLookup heap pack_addr
                                                                [pack_addr, base_addr, f_addr] = getargs heap stack
