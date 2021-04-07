@@ -24,7 +24,9 @@ data Node = NAp Addr Addr
              | NInd Addr
              | NPrim Name Primitive
              | NData Int [Addr]
-             | NMarked Node
+             | NMarked MarkedState Node
+
+data MarkedState = Done | Visits Int
 
 data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity 
                 | If | Greater | GreaterEq | Less | LessEq | Eq | NotEq 
@@ -150,7 +152,7 @@ gc (output, stack, dump, heap, globals, stats) = (output, stack', dump', cleaned
                                                      marked_heap = foldl markFrom heap addrs 
                                                      cleaned_heap = scanHeap marked_heap
 old version--}
-markFrom :: TiHeap -> Addr -> (TiHeap,Addr)
+{--markFrom :: TiHeap -> Addr -> (TiHeap,Addr)
 markFrom heap addr = case node of
                        (NMarked n) -> (heap,addr)
                        (NAp a1 a2) ->  (heap''',addr) where (heap',addr1) = markFrom heap a1
@@ -161,7 +163,44 @@ markFrom heap addr = case node of
                        (NData n addrs) -> (marked_heap, addr) where (heap',addrs') = mapAccuml markFrom heap addrs
                                                                     marked_heap = hUpdate heap' addr (NMarked (NData n addrs'))--(hUpdate (foldl markFrom heap addrs) addr (NMarked node), addr)
                        nod -> (hUpdate heap addr (NMarked nod), addr)
-                   where node = hLookup heap addr
+                   where node = hLookup heap addr--}
+
+markFrom' :: TiHeap -> Addr -> (TiHeap,Addr)
+markFrom' heap addr = markStateMachine addr hNull heap
+
+markStateMachine :: Addr -> Addr -> TiHeap -> (TiHeap, Addr)
+markStateMachine f b h = case (node, hIsnull b) of 
+                           (NAp a1 a2, _) -> markStateMachine a1 f (hUpdate h f (NMarked (Visits 1) (NAp b a2))) 
+                           (NPrim n p, _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NPrim n p))) 
+                           (NSupercomb n args body, _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NSupercomb n args body)))
+                           (NNum n, _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NNum n)))
+                           (NInd a, _) -> markStateMachine a b h
+                           (NData t [], _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NData t [])))
+                           (NData t (a:args), _) -> markStateMachine a f (hUpdate h f (NMarked (Visits 1) (NData t (b:args)))) 
+                           (NMarked (Done) n, False) -> 
+                                 case back_node of 
+                                       (NMarked (Visits 1) (NAp b' a2)) -> markStateMachine a2 b (hUpdate h b (NMarked (Visits 2) (NAp f b')))  
+                                       (NMarked (Visits 2) (NAp a1 b')) -> markStateMachine b b' (hUpdate h b (NMarked (Done) (NAp a1 f)))
+                                       (NMarked (Visits v) (NData t args)) -> 
+                                             case hIsnull next of
+                                                   True -> markStateMachine b prec (hUpdate h b (NMarked (Done) (NData t (replaceNth (v-1) f args))))
+                                                   False -> markStateMachine next b (hUpdate h b (NMarked (Visits (v+1)) (NData t (replaceNth v prec (replaceNth (v-1) f args)))))
+                                               where 
+                                                    (prec, next) = takeArgs v args   
+                           (NMarked (Done) _, True) -> (h, f)
+                       where node = hLookup h f
+                             back_node = hLookup h b
+
+takeArgs :: Int -> [Int] -> (Int,Int)
+takeArgs v args | (length args) == v = (args!!(v-1), hNull)
+                | (length args) > v = (b', next) where b' = args!!(v-1)
+                                                       next = args!!(v)
+                                                       
+replaceNth :: Int -> a -> [a] -> [a]
+replaceNth _ _ [] = []
+replaceNth n newVal (x:xs)
+      | n == 0 = newVal:xs
+      | otherwise = x:replaceNth (n-1) newVal xs  
 
 scanHeap :: TiHeap -> TiHeap
 scanHeap heap = foldl free heap xs
@@ -169,14 +208,14 @@ scanHeap heap = foldl free heap xs
 
 free :: TiHeap -> (Addr, Node) -> TiHeap
 free heap x = case x of
-                  (addr, NMarked n) -> hUpdate heap addr n
+                  (addr, NMarked _ n) -> hUpdate heap addr n
                   (addr, _) -> hFree heap addr
 
 --findRoots :: TiStack -> TiDump -> TiGlobals -> [Addr]
 --findRoots stack dump globals = findStackRoots stack ++ findDumpRoots dump ++ findGlobalRoots globals
 
 markFromStack :: TiHeap -> TiStack -> (TiHeap,TiStack)--findStackRoots stack = stack
-markFromStack heap stack = mapAccuml markFrom heap stack
+markFromStack heap stack = mapAccuml markFrom' heap stack
 
 markFromDump :: TiHeap -> TiDump -> (TiHeap,TiDump)
 markFromDump heap dump = mapAccuml markFromStack heap dump
@@ -184,7 +223,7 @@ markFromDump heap dump = mapAccuml markFromStack heap dump
 markFromGlobals :: TiHeap -> TiGlobals -> (TiHeap,TiGlobals)
 markFromGlobals heap globals = mapAccuml markGlobal heap globals
                                where
-                                 markGlobal h (n, a) = let (h', a') = markFrom h a in (h', (n, a'))
+                                 markGlobal h (n, a) = let (h', a') = markFrom' h a in (h', (n, a'))
 
 remove_duplicates :: Eq a => [a] -> [a]
 remove_duplicates [] = []
@@ -449,7 +488,7 @@ showFWAddr addr = iStr (space1 (4 - length str) ++ str)
                 where str = show addr
 
 showStats :: TiState -> Iseq
-showStats (output, stack, dump, heap, globals, stats) = iConcat ([ iNewline, iNewline, iStr "Total number of steps = ", iNum (tiStatGetSteps stats), iNewline, iStr "Main = ["] ++ (map (\n -> iAppend (iNum n) (iStr ",")) output) ++ [iStr "]"])
+showStats (output, stack, dump, heap, globals, stats) = iConcat ([ iNewline, iNewline, iStr "Total number of steps = ", iNum (tiStatGetSteps stats), iNewline, iStr "Main = "] ++ (map (\n -> iAppend (iNum n) (iStr " ")) output))
 
 --showResults (eval (compile (parseProg "main = S K K 3"))) 
 
