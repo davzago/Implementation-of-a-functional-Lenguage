@@ -51,33 +51,62 @@ data Node = NAp Addr Addr
 Di seguito mostriamo un esempio di esecuzione del programma main = S K K 3 e discutiamo la sua esecuzione. 
 
 ~~~ 
-1) Stk [   1: NSupercomb main
+   1) Stk [   1: NSupercomb main
             ]
-   1) Stk [  11: NAp    9   10 (NNum 3)
+      
+   2) Stk [   1: NAp   42   43 (NNum 3)
             ]
-   2) Stk [   9: NAp    8    3 (NSupercomb k)
-             11: NAp    9   10 (NNum 3)
+      
+   3) Stk [  42: NAp   41    3 (NSupercomb K)
+              1: NAp   42   43 (NNum 3)
             ]
-   3) Stk [   8: NAp    5    3 (NSupercomb k)
-              9: NAp    8    3 (NSupercomb k)
-             11: NAp    9   10 (NNum 3)
+      
+   4) Stk [  41: NAp    5    3 (NSupercomb K)
+             42: NAp   41    3 (NSupercomb K)
+              1: NAp   42   43 (NNum 3)
             ]
-   4) Stk [   5: NSupercomb s
-              8: NAp    5    3 (NSupercomb k)
-              9: NAp    8    3 (NSupercomb k)
-             11: NAp    9   10 (NNum 3)
+      
+   5) Stk [   5: NSupercomb S
+             41: NAp    5    3 (NSupercomb K)
+             42: NAp   41    3 (NSupercomb K)
+              1: NAp   42   43 (NNum 3)
             ]
-   5) Stk [  14: NAp   12   13 (NAp 3 10)
+      
+   6) Stk [   1: NAp   40   44 (NAp 3 43)
             ]
-   6) Stk [  12: NAp    3   10 (NNum 3)
-             14: NAp   12   13 (NAp 3 10)
+      
+   7) Stk [  40: NAp    3   43 (NNum 3)
+              1: NAp   40   44 (NAp 3 43)
             ]
-   7) Stk [   3: NSupercomb k
-             12: NAp    3   10 (NNum 3)
-             14: NAp   12   13 (NAp 3 10)
+      
+   8) Stk [   3: NSupercomb K
+             40: NAp    3   43 (NNum 3)
+              1: NAp   40   44 (NAp 3 43)
             ]
-   8) Stk [  10: NNum 3]
-Total number of steps = 8
+      
+   9) Stk [  1: NNum 3
+            ]
+   Total number of steps = 8
 ~~~
 
-Inizialmente lo stack contiene solamente l'indirizzo del main che è un supercombinator dunque viene chiamata la funzione *scStep*, visto che il main non ha alcun argomento   
+La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finchè non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione corretta, in questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che instanzia nello heap il corpo del supercombinator e imposta il suo indirizzo come radice che deve essere aggiornata una volta valutata l'espressione.
+Una volta istanziato il supercombinator si nota che nello stack è presente una applicazione dunque viene chiamata la funzione *apStep* che descatola il suo primo argomento, questo viene fatto da 2) a 5) dove si trova il supercombinator S in cima allo stack, in questo stato viene dunque chiamata nuovamente *scStep* che procede ad istanziare il corpo di S definito in questo modo nelle definizioni del prelude:
+
+~~~
+("S", ["f","g","x"], EAp (EAp (EVar "f") (EVar "x")) (EAp (EVar "g") (EVar "x")))
+~~~
+
+In pratica la funzione S prende due funzioni ed un argomento e crea questa applicazione : f x (g x), visto che si tratta di un' applicazione viene usata nuovamente *apStep* che cerca l'applicazione outermost fino a quando trova K che è un super combinator definito in questo modo:
+
+~~~
+("K", ["x","y"], EVar "x")
+~~~
+
+Dunque il body di questo supercombinator è semplicemente una Evar x che per mano di *instantiateAndUpdate* viene collegata all'argomento corretto da *getargs* ovvero NNum 3, la radice viene quindi aggiornata a questo valore.
+Nella successiva chiamata di step *TiFinal* ci dice che ci troviamo in uno stato finale in quanto nello stack c'è un solo indirizzo di un numero e il dump è vuoto qundi la valutazione termina.  
+
+- Let letrec
+- mkPair
+- case expressions
+- liste e perchè fatte così
+- gc

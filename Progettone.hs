@@ -106,7 +106,7 @@ compile :: CoreProgram -> TiState
 compile program = (output, initial_stack, initialTiDump, initial_heap', globals, tiStatInitial)
                     where sc_defs = program ++ preludeDefs ++ extraPreludeDefs
                           (initial_heap, globals) = buildInitialHeap sc_defs
-                          initial_stack = [addr]
+                          initial_stack = [address_of_main]
                           address_of_main = aLookup globals "main" (error "main is not defined")
                           address_of_print = aLookup globals "printList" (error "print_list is not defined")
                           (initial_heap', addr) = hAlloc initial_heap (NAp address_of_print address_of_main)
@@ -174,7 +174,7 @@ markStateMachine f b h = case (node, hIsnull b) of
                            (NPrim n p, _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NPrim n p))) 
                            (NSupercomb n args body, _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NSupercomb n args body)))
                            (NNum n, _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NNum n)))
-                           (NInd a, _) -> markStateMachine a b h
+                           (NInd a, _) -> markStateMachine f b (hUpdate h f (hLookup h a)) -- markStateMachine a b h
                            (NData t [], _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NData t [])))
                            (NData t (a:args), _) -> markStateMachine a f (hUpdate h f (NMarked (Visits 1) (NData t (b:args)))) 
                            (NMarked (Done) n, False) -> 
