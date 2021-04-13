@@ -136,7 +136,7 @@ eval state = state : rest_states
              next_states = doAdmin (step state)
 
 doAdmin :: TiState -> TiState
-doAdmin state | hSize heap > 10 = applyToStats tiStatIncSteps (gc state)
+doAdmin state | hSize heap > 1000 = applyToStats tiStatIncSteps (gc state)
               | otherwise = applyToStats tiStatIncSteps state
               where (_, _, _, heap, _, _) = state
               
@@ -188,6 +188,7 @@ markStateMachine f b h = case (node, hIsnull b) of
                                                where 
                                                     (prec, next) = takeArgs v args   
                            (NMarked (Done) _, True) -> (h, f)
+                           _ -> markStateMachine f b (hUpdate h b (NMarked Done node))
                        where node = hLookup h f
                              back_node = hLookup h b
 
@@ -414,8 +415,9 @@ instantiate (EAp e1 e2) heap env = hAlloc heap2 (NAp a1 a2)
 instantiate (EVar v) heap env = (heap, aLookup env v (error ("Undefined name " ++ show v)))
 
 instantiate (EConstr tag arity) heap env = instantiateConstr tag arity heap env
-instantiate (ELet isrec defs body) heap env = instantiate body heap1 env1
-                                             where (heap1,env1) = instantiateLet isrec defs body heap env
+
+instantiate (ELet isrec defs body) heap env = instantiateLet isrec defs body heap env
+
 instantiate (ECase e alts) heap env = error "Can’t instantiate case exprs"
 
 instantiateConstr tag arity heap env = hAlloc heap (NPrim "Pack" (PrimConstr tag arity))
@@ -426,11 +428,10 @@ instantiateLet isrec ((v,expr):defs) body heap env = instantiateLet isrec defs b
                                                                        env1 = (v,addr) : env --2
                                                                        -}
 
-instantiateLet isrec [] body heap env = (heap,env)
-instantiateLet isrec ((v,expr):defs) body heap env = (heap2, env2) 
-                                                                 where (heap1, env1) = instantiateLet isrec defs body heap (if isrec == NonRecursive then env else env2)
-                                                                       env2 = (v,addr) : env --2
-                                                                       (heap2, addr) = instantiate expr heap1 env1 --1
+instantiateLet isrec defs body heap env = instantiate body heap1 env1
+                                         where (heap1,bindings) = mapAccuml getDef heap defs
+                                               getDef = instantiateDef (if isrec == NonRecursive then env else env1)
+                                               env1 = bindings ++ env
 
 instantiateAndUpdate :: CoreExpr --Body of supercombinator
                         -> Addr -- Address of node to update
@@ -447,10 +448,17 @@ instantiateAndUpdate (EAp e1 e2) upd_addr heap env = hUpdate heap2 upd_addr (NAp
 instantiateAndUpdate (EVar v) upd_addr heap env = hUpdate heap upd_addr (NInd (aLookup env v (error ("Undefined name " ++ show v))))
 
 instantiateAndUpdate (EConstr tag arity) upd_addr heap env = hUpdate heap upd_addr (NPrim "Pack" (PrimConstr tag arity))
+
 instantiateAndUpdate (ELet isrec defs body) upd_addr heap env = instantiateAndUpdate body upd_addr heap1 env1
-                                                              where (heap1,env1) = instantiateLet isrec defs body heap env
+                                                              where (heap1,bindings) = mapAccuml getDef heap defs
+                                                                    getDef = instantiateDef (if isrec == NonRecursive then env else env1)
+                                                                    env1 = bindings ++ env 
 
 instantiateAndUpdate (ECase e alts) upd_addr heap env = error "Can’t instantiate case exprs"
+
+instantiateDef :: TiGlobals -> TiHeap -> (Name, CoreExpr) -> (TiHeap, (Name, Addr))
+instantiateDef env heap (name, body) =  (heap', (name, addr))
+                                      where (heap', addr) = instantiate body heap env
 
 --letrec a = b; b= c in a
 --1. instantiate the right-hand side of each of the definitions in defs;

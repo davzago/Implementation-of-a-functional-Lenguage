@@ -105,6 +105,19 @@ In pratica la funzione S prende due funzioni ed un argomento e crea questa appli
 Dunque il body di questo supercombinator è semplicemente una Evar x che per mano di *instantiateAndUpdate* viene collegata all'argomento corretto da *getargs* ovvero NNum 3, la radice viene quindi aggiornata a questo valore.
 Nella successiva chiamata di step *TiFinal* ci dice che ci troviamo in uno stato finale in quanto nello stack c'è un solo indirizzo di un numero e il dump è vuoto qundi la valutazione termina.  
 
+Tra le varie istanziazioni di espressioni la più difficoltosa è quella di let, specialmente nel caso ricorsivo infatti quando alcune definizioni formano dei cicli. *istantiateAndUpdate* nel caso di Let istanzia 
+
+- Arithmetic
+Per implementare le operazioni aritmetiche utilizziamo le primitive:
+~~~ haskell
+data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity 
+                | If | Greater | GreaterEq | Less | LessEq | Eq | NotEq 
+                | PrimCasePair | Abort | PrimCaseList | Stop | Print
+~~~
+
+Per prima cosa creiamo una lista di associazioni nome-primitiva, ad esempio '+' corrisponderà alla primitiva Add, in questo modo quando il parser restituirà una EVar '+' potremmo creare il nodo NPrim '+' Add nello heap.
+Successivamente per applicare effettivamente queste operazioni viene usata la funzione *primStep* che a seconda della primitiva che viene trovata in cima allo stack decide cosa fare. In generale per le operazioni aritmetiche quello che accade è che se gli argomenti dell'operazione sono valutati si procede con l'operazione altrimenti si procede a valutare gli argomenti mettendo lo stack corrente nel dump e mettendi in cima allo stack l'argomento da valutare, questo. 
+
 - Let letrec
 - mkPair
 - case expressions
