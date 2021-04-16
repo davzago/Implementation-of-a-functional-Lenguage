@@ -106,7 +106,7 @@ compile :: CoreProgram -> TiState
 compile program = (output, initial_stack, initialTiDump, initial_heap', globals, tiStatInitial)
                     where sc_defs = program ++ preludeDefs ++ extraPreludeDefs
                           (initial_heap, globals) = buildInitialHeap sc_defs
-                          initial_stack = [address_of_main]
+                          initial_stack = [address_of_main] -- addr per printList main
                           address_of_main = aLookup globals "main" (error "main is not defined")
                           address_of_print = aLookup globals "printList" (error "print_list is not defined")
                           (initial_heap', addr) = hAlloc initial_heap (NAp address_of_print address_of_main)
