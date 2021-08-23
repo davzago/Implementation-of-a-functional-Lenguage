@@ -454,6 +454,7 @@ instantiateAndUpdate (ELet isrec defs body) upd_addr heap env = instantiateAndUp
                                                                     getDef = instantiateDef (if isrec == NonRecursive then env else env1)
                                                                     env1 = bindings ++ env 
 
+
 instantiateAndUpdate (ECase e alts) upd_addr heap env = error "Can’t instantiate case exprs"
 
 instantiateDef :: TiGlobals -> TiHeap -> (Name, CoreExpr) -> (TiHeap, (Name, Addr))
