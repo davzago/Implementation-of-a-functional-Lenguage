@@ -458,12 +458,12 @@ instantiateAndUpdate (ELet isrec defs body) upd_addr heap env = instantiateAndUp
 instantiateAndUpdate (ECase e alts) upd_addr heap env = error "Can’t instantiate case exprs"
 
 instantiateDef :: TiGlobals -> TiHeap -> (Name, CoreExpr) -> (TiHeap, (Name, Addr))
-instantiateDef env heap (name, body) =  (heap', (name, addr))
-                                      where (heap', addr) = instantiate body heap env
+instantiateDef env heap (name, body) =  (heap', (name, addr))    --[(f,_), (x,_)]
+                                      where (heap', addr) = instantiate body heap env     
 
 --letrec a = b; b= c in a
---1. instantiate the right-hand side of each of the definitions in defs;
---2. augment the environment to bind the names in defs to the addresses of the newly constructed instances;
+--1. instantiate the right-hand side of each of the definitions in defs; <-- env1 
+--2. env1 = augment the environment to bind the names in defs to the addresses of the newly constructed instances;
 --3. call instantiate passing the augmented environment and the expression body.
 
 showResults :: [TiState] -> [Char]

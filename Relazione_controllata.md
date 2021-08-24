@@ -191,19 +191,117 @@ Total number of steps = 4
 L'esecuzione riportata è praticamente identica a quella precedente, questo perchè mentre l'operazione è sempre la stessa ovvero una somma ciò che viene gestito in modo leggermente diverso sono le variabili, in questo caso infatti il programma usa il costrutto let che permette di creare delle definizioni che possono essere utilizzate all'interno del body. Il processo di assegnazione non è visibile guardando lo stack 
 
 L'esecuzione del programma sembra essere uguale alla precedente se guardiamo lo stack ad ogni iterazione, così non è in quanto all'inizio quando si istanzia il body del main abbiamo il costrutto let che permette di creare delle definizioni che possono essere utilizzate all'interno del body.
+Per permettere che questo avvenga inanzitutto queste definizioni vanno istanziate, questo viene fatto utilizzando il caso Let di InstantiateAndUpdate, nel nostro esempio le definizioni sono x = 5 e y = 6, si procede dunque a istanziare ciascuna definizione e successivamente ad aggiungere all'enviroment locale l'associazione nome della definizione e indirizzo del nodo risultante dall'istanziazione della definizione. 
+Una volta istanziate le definizioni si procede con l'istanziazione e valutazione del body del costrutto let, ossia nel nostro esempio *x + y*.
+
+Vediamo ora un altro esempio, dove viene mostrato chiaramente l'esecuzione del programma: *main = let y = 4 + 3; x = 4 in x+y* 
+~~~
+
+   1) Stk [   1: NSupercomb main
+            ]
+~~~
+In questa prima fase viene istanziato il corpo del main, ossia il costrutto let, nel fare ciò si procede ad istanziare tutte le sue definizioni, nel nostro caso y = 4 + 3, x = 4.
+~~~
+      
+   2) Stk [   1: NAp   46   44 (NAp 42 43)
+            ]
+~~~
+Viene istanziato il body del costrutto Let, e se ne inizia la valutazione eseguendo l'istruzione apStep che applica la regola dell'applicazione, andando a mettere sulla cima dello stack il nodo di indirizzo 46.
+~~~
+      
+   3) Stk [  46: NAp   24   45 (NNum 4)
+              1: NAp   46   44 (NAp 42 43)
+            ]
+~~~
+Viene applicato apStep al nodo di indirizzo 46.
+~~~
+      
+   4) Stk [  24: NPrim +
+             46: NAp   24   45 (NNum 4)
+              1: NAp   46   44 (NAp 42 43)
+            ]
+~~~
+Ora primDyadic controlla se gli argomenti dei NAp di indirizzo 46 e 1, che sono rispettivamente i nodi di indirizzo 45 e 44, siano stati valutati completamente, nel nostro esempio il nodo di indirizzo 44 non è stato valutato, e corrisponde a *4 + 3*, questo succede in quanto il linguaggio è lazy, ossia valuta un'espressione solo quando è strettamente necessario. Si procede quindi a spostare lo stack corrente nel dump e inserire l'indirizzo del nodo che si vuole valutare nello stack appena svuotato. 
+~~~
+      
+   5) Stk [  44: NAp   42   43 (NNum 3)
+            ]
+~~~
+Ora abbiamo nello stack l'indirizzo del nodo che corrisponde all'espressione *4 + 3*, viene applicato apStep al nodo di indirizzo 44.
+
+~~~
+
+   6) Stk [  42: NAp   24   41 (NNum 4)
+             44: NAp   42   43 (NNum 3)
+            ]
+~~~
+Viene applicato apStep al nodo di indirizzo 42.
+~~~      
+
+   7) Stk [  24: NPrim +
+             42: NAp   24   41 (NNum 4)
+             44: NAp   42   43 (NNum 3)
+            ]
+~~~
+Qui viene applicato primStep al nodo di indirizzo 24 che termina la valutazione della definizione *4 + 3*, l'indirizzo radice (44) viene fatto puntare al risultato dell'operazione
+~~~
+
+   8) Stk [  44: NNum 7
+            ]
+~~~
+Ora che la valutazione degli argomenti è completa lo stack precedente viene estratto dal dump e si procede alla valutazione
+~~~
+      
+   9) Stk [  46: NAp   24   45 (NNum 4)
+              1: NAp   46   44 (NNum 7)
+            ]
+      
+  10)   Stk [  24: NPrim +
+             46: NAp   24   45 (NNum 4)
+              1: NAp   46   44 (NNum 7)
+            ]
+      
+  11)   Stk [   1: NNum 11
+            ]
+
+Il Core lenguage permette anche di creare delle definizioni ricorsive all'interno della clausola let, riportiamo e discutiamo quindi l'esecuzione del codice: *main = letrec f = x + 3; x = 4 in f*
 
 
-Per permettere che questo avvenga inanzitutto queste definizioni vanno istanziate, questo viene fatto utilizzando il caso Let di InstantiateAndUpdate, nel nostro esempio le definizioni sono x = 5 e y = 6, si procede dunque a istanziare ciascuna definizione e successivamente ad aggiungere all'enviroment locale l'associazione nome della definizione e indirizzo del nodo risultante dall'istanziazione della definizione 
 
-una volta istanziate le definizioni si collega il risultato di queste con il nome della definizione e li si inserisce nella lista di associazioni nome indirizzo
+   1) Stk [   1: NSupercomb main
+            ]
+  ~~~
+  Viene istanziato il corpo del main.
+  ~~~
+   
+   2) Stk [   1: NInd   43
+            ]
+      
+   3) Stk [  43: NAp   41   42 (NNum 3)
+            ]
+      
+   4) Stk [  41: NAp   24   44 (NNum 4)
+             43: NAp   41   42 (NNum 3)
+            ]
+      
+   5) Stk [  24: NPrim +
+             41: NAp   24   44 (NNum 4)
+             43: NAp   41   42 (NNum 3)
+            ]
+      
+   6) Stk [  43: NNum 7
+            ]
+~~~
+The hint in this exercise seems curious, because it requires the name-to-address bindings pro-
+duced in Step 2 to be used as an input to Step 1. If you try this in Miranda it all works perfectly
+because, as in any non-strict functional language, the inputs to a function do not have to be
+evaluated before the function is called. In a real implementation we would have to do this trick
+‘by hand’, by working out the addresses at which each of the (root) nodes in the letrec will be
+allocated, augmenting the environment to reflect this information, and then instantiating the
+right-hand sides.
 
-una volta istanziate le definizioni e ottenuti l'indirizzo dei nodi risultanti, si procederà ad aggiungere il nome della definizione e l'indirizzo del nodo risultante
+Il caso ricorsivo è più complesso in quanto tutti i bindings nome-indirizzo devono essere prodotti prima di istanziare le definizioni, per fare ciò abbiamo sfruttato il fatto che haskell è lazy e quindi non valuta le espressioni a meno che non sia strettamente necessario. In particolare in *istantiateAndUpdate* nel caso ricorsivo di Elet istanzia la parte destra delle definizioni utilizzando i bindings (env1) che in pratica devono ancora essere creati, questo è possibile perchè nella chiamata di *instantiateDef* la funzione instantiate non viene immediatamente chiamata ma viene momentaneamente ritornata la tupla (heap',(name,addr)) dove solamente name è effettivamente valutata. Questo procedimento è eseguito nel primo passo di esecuzione dove il supercombinator main viene istanziato utilizzando *scStep*.
 
-si ottiene l'indirizzo del nodo risultante dall'istanziazione della definizione, per poi aggiungere l'associazione nome della definizione e indirizzo nell'enviroment locale 
-
-aggiungiamo l'associazione nome della definizione e indirizzo del nodo risultante dall'istanziazione della definizione all'enviroment locale.
-
-Questa implementazione non gestisce le Case expressions, dunque per gestire gli oggetti vengono utilizzati i costrutti if casePair e caseList, oggetti più generici invece non possono esssere gestiti.
 ### Coppie
 
 Per gestire le coppie utilizziamo la costruzione Pack{1,2}, questo porterà alla costruzione di un NData che contiene il tag 1 e 2 indirizzi, per poter estrarre un nodo dalla coppia utilizziamo *casePair*, costruita come una primitiva questa funzione prende una coppia e vi applica una funzione ausiliaria. per ottenere il primo elemento della coppia basterà scrivere casepair p K dove p è una coppia. 
