@@ -307,6 +307,8 @@ primCasePair (output, stack, dump, heap, globals, stats) = case mk of
                                                              (NData 1 [a,b]) -> (output, stack', dump, heap'', globals, stats) where 
                                                                                                                                      heap'' = hUpdate heap' (head stack') (NAp addr b)
                                                                                                                                      (heap',addr) = hAlloc heap (NAp f_addr a)
+                                                             (NNum _) -> error "NNum is not MKpair"
+                                                             (NData _ _) -> error "this NData is not MKpair"
                                                              _               -> (output, [mk_addr], (drop 1 stack):dump, heap, globals, stats)
                                                          where 
                                                                mk = hLookup heap mk_addr

@@ -53,7 +53,7 @@ Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e d
 ~~~ 
    1) Stk [   1: NSupercomb main
             ]
-      
+
    2) Stk [   1: NAp   42   43 (NNum 3)
             ]
       
@@ -88,9 +88,6 @@ Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e d
             ]
    Total number of steps = 8
 ~~~
-
-nap ((nap + 2) 3)
-EAp (EAp (EVar "+") (EVar "x")) (EVar "y")
 
 La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finché non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione corretta, in questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che istanzia nello heap il corpo del supercombinator e imposta il suo indirizzo come radice che deve essere aggiornata una volta valutata l'espressione.
 Una volta istanziato il supercombinator si nota che nello stack è presente una applicazione dunque viene chiamata la funzione *apStep* che descatola il suo primo argomento, questo viene fatto da 2) a 5) dove si trova il supercombinator S in cima allo stack, in questo stato viene dunque chiamata nuovamente *scStep* che procede ad istanziare il corpo di S definito in questo modo nelle definizioni del prelude:
@@ -186,7 +183,6 @@ Andiamo ora a vedere un esempio di esecuzione della seguente istruzione: *main =
 5) Stk [   1: NNum 11
          ]
       
-Total number of steps = 4
 ~~~
 L'esecuzione riportata è praticamente identica a quella precedente, questo perchè mentre l'operazione è sempre la stessa ovvero una somma ciò che viene gestito in modo leggermente diverso sono le variabili, in questo caso infatti il programma usa il costrutto let che permette di creare delle definizioni che possono essere utilizzate all'interno del body. Il processo di assegnazione non è visibile guardando lo stack 
 
@@ -292,19 +288,106 @@ Il Core lenguage permette anche di creare delle definizioni ricorsive all'intern
    6) Stk [  43: NNum 7
             ]
 ~~~
-The hint in this exercise seems curious, because it requires the name-to-address bindings pro-
-duced in Step 2 to be used as an input to Step 1. If you try this in Miranda it all works perfectly
-because, as in any non-strict functional language, the inputs to a function do not have to be
-evaluated before the function is called. In a real implementation we would have to do this trick
-‘by hand’, by working out the addresses at which each of the (root) nodes in the letrec will be
-allocated, augmenting the environment to reflect this information, and then instantiating the
-right-hand sides.
 
 Il caso ricorsivo è più complesso in quanto tutti i bindings nome-indirizzo devono essere prodotti prima di istanziare le definizioni, per fare ciò abbiamo sfruttato il fatto che haskell è lazy e quindi non valuta le espressioni a meno che non sia strettamente necessario. In particolare in *istantiateAndUpdate* nel caso ricorsivo di Elet istanzia la parte destra delle definizioni utilizzando i bindings (env1) che in pratica devono ancora essere creati, questo è possibile perchè nella chiamata di *instantiateDef* la funzione instantiate non viene immediatamente chiamata ma viene momentaneamente ritornata la tupla (heap',(name,addr)) dove solamente name è effettivamente valutata. Questo procedimento è eseguito nel primo passo di esecuzione dove il supercombinator main viene istanziato utilizzando *scStep*.
 
+
+Questa implementazione non gestisce le Case expressions, dunque per gestire gli oggetti vengono utilizzati i costrutti if casePair e caseList, oggetti più generici invece non possono esssere gestiti.
+
+Le strutture dati vengono costruite utilizzando Pack{t,a} dove t è la tag mentre a è il numero di argomenti, questo costrutto è stato rappresentato con la primitiva *PrimConstr t a* quindi possiamo istanziare una espressione EConstr nell'heap come *NPrim "Pack" (PrimConstr t a)*. Abbiamo quindi aggiunto un caso a *primStep* per poter gestire la nuova primitiva che utilzza la funzione ausiliaria *primConstr* che si occupa di controllare se al costruttore vengono dati abbastanza argomenti, se questo è vero allora viene istanziato un oggetto nell'heap che sarà rappresentato dal tipo di nodo NDdata che conterrà il tag e l'indirizzo dei vari argomenti.
+
+Per rappresentare True e False abbiamo utilizzato rispettivamente Pack{2,0} e Pack{1,0} inserendo le definizioni in *extraPreludeDefs*.
+
 ### Coppie
 
-Per gestire le coppie utilizziamo la costruzione Pack{1,2}, questo porterà alla costruzione di un NData che contiene il tag 1 e 2 indirizzi, per poter estrarre un nodo dalla coppia utilizziamo *casePair*, costruita come una primitiva questa funzione prende una coppia e vi applica una funzione ausiliaria. per ottenere il primo elemento della coppia basterà scrivere casepair p K dove p è una coppia. 
+Per gestire le coppie utilizziamo la costruzione Pack{1,2}, questo porterà alla costruzione di un NData che contiene il tag 1 e 2 indirizzi, per poter estrarre un nodo dalla coppia utilizziamo *casePair*, costruita come una primitiva questa funzione prende una coppia e vi applica una funzione ausiliaria. per ottenere il primo elemento della coppia basterà scrivere casepair p K dove p è una coppia (K è una funziona che dati due argomenti restituisce solo il primo).
+
+Di seguito mostriamo l'esecuzione del programma "main = let p = Pack{1,2} 4 5 in casePair p K"
+~~~
+
+   1) Stk [   1: NSupercomb main
+            ]
+~~~
+Viene istanziato il body del supercombinator main con il comando scStep, viene quindi istanziata la definizione Pack{1,2} 4 5 del let e viene sostituito il nodo radice con il nodo corrispondente al body del let.
+~~~
+      
+   2) Stk [   1: NAp   46    3 (NSupercomb K)
+            ]
+~~~
+Viene applicato apStep
+~~~
+   3) Stk [  46: NAp   35   45 (NAp 43 44)
+              1: NAp   46    3 (NSupercomb K)
+            ]
+~~~
+Viene applicato nuovamente apStep
+~~~
+      
+   4) Stk [  35: NPrim casePair
+             46: NAp   35   45 (NAp 43 44)
+              1: NAp   46    3 (NSupercomb K)
+            ]
+~~~
+Visto che in cima allo stack si trova una primitiva viene chiamato *primStep* che utilizzerà *primCasePair* la quale proverà ad applicare la funzione in (3) a (45) ma in questo caso l'espressione (45) non è ancora stata valutata quindi lo stack viene spostato nel dump e si mette nello stack l'esperssione da valutare.
+~~~
+      
+   5) Stk [  45: NAp   43   44 (NNum 5)
+            ]
+
+   6) Stk [  43: NAp   41   42 (NNum 4)
+             45: NAp   43   44 (NNum 5)
+            ]
+      
+   7) Stk [  41: NPrim Pack
+             43: NAp   41   42 (NNum 4)
+             45: NAp   43   44 (NNum 5)
+            ]
+~~~
+A questo punto troviamo la primitiva pack in cima allo stack quindi viene chiamata la funzione *primConstr* che prenderà attraverso *getargs* gli argomenti a indirizzo (42) e (44) e costruirà un NData con tag 1 e contenente una lista di 2 argomenti
+~~~
+
+   8) Stk [  45: NData 1 2
+            ]
+~~~
+Visto che in cima allo stack c'è un NData l'espressione è stata completamente valutata quindi si estrae il vecchio stack dal dump e si continua la valutazione 
+~~~
+      
+   9) Stk [  46: NAp   35   45 (NData 1 2)
+              1: NAp   46    3 (NSupercomb K)
+            ]
+      
+  10) Stk [  35: NPrim casePair
+             46: NAp   35   45 (NData 1 2)
+              1: NAp   46    3 (NSupercomb K)
+            ]
+
+~~~
+Questa volta *casePair* troverà la coppia valutata quindi potrà applicare la funzione K a (4,5)
+~~~      
+
+  11) Stk [   1: NAp   47   44 (NNum 5)
+            ]
+      
+  12) Stk [  47: NAp    3   42 (NNum 4)
+              1: NAp   47   44 (NNum 5)
+            ]
+      
+  13) Stk [   3: NSupercomb K
+             47: NAp    3   42 (NNum 4)
+              1: NAp   47   44 (NNum 5)
+            ]
+~~~
+K è un supercombinator, in questo caso è una funzione definita nel Prelude, quindi viene utilizzata *scStep*
+~~~
+      
+  14) Stk [   1: NInd   42
+            ]
+      
+  15) Stk [  42: NNum 4
+            ]
+
+~~~
+Il risultato finale è quindi il numero 4 estratto dalla coppia (4,5)
 
 ### Liste
 
@@ -313,7 +396,14 @@ Utilizziamo una definizione ricorsiva delle liste:
 ~~~
 list * ::= Nil | Cons * (list *)
 ~~~
+
 *Nil* corrisponderà a Pack{1,0} mentre *Cons* corrisponderà a Pack{2,2}, ora per gestire questo tipo di lista implementiamo una nuova primitiva ovvero *caseList* che ha il compito di ritornare un caso base quando ha in input una lista vuota (Nil) altrimenti applicare una funzione ausiliaria sugli elementi della lista. anche *caseList* è stata implementata come una primitiva.
+
+~~~
+caseList Pack{1,0} cn cc = cn
+caseList (Pack{2,2} x xs) cn cc = cc x xs
+~~~
+
 Per poter ottenere una lista come output di un programma è stato necessario fare delle modifiche al codice: per prima cosa è stato aggiunto output a TiState, questo nuovo campo, una volta eseguito tutto il programma, conterrà la lista risultante.
 Per ottenere questa stampa sono state implementate le primitiva stop, che si occupa di mettere TiState in una configurazione finale quando la lista è stata stampata, e print che si occupa di mettere il valore corrente nell'output.
 Queste due funzioni vengono utilizzate in questo modo per poter stampare l'intera lista risultante:
@@ -325,6 +415,161 @@ printCons h t = print h (printList t)
 
 Per fare si che il risultato possa essere stampato è il compilatore deve essere modificato in modo che lo stack iniziale non contenga più solo il main ma l'applicazione (printList main).
 
+~~~
+   1) Stk [  40: NAp   21    1 (NSupercomb main)
+            ]
+~~~
+Notiamo che ora lo stack iniziale contiene una applicazione che corrisponde a *printList main* dunque per prima cosa verrà chiamata *apStep*
+~~~
+      
+   2) Stk [  21: NSupercomb printList
+             40: NAp   21    1 (NSupercomb main)
+            ]
+~~~
+ora in cima allo stack troviamo il supercombinator definito in extraPreludeDefs *printList* che viene istanziato chiamando *scStep*
+~~~
+   3) Stk [  40: NAp   42   22 (NSupercomb printCons) 
+            ]
+~~~
+Nello stack viene dunque inserita la definizione di *printList* che viene 'aperta' utilizzando più volte *apStep*
+~~~
+   4) Stk [  42: NAp   41   39 (NPrim stop)
+             40: NAp   42   22 (NSupercomb printCons)
+            ]
+      
+   5) Stk [  41: NAp   37    1 (NSupercomb main)
+             42: NAp   41   39 (NPrim stop)
+             40: NAp   42   22 (NSupercomb printCons)
+            ]
+      
+   6) Stk [  37: NPrim caseList
+             41: NAp   37    1 (NSupercomb main)
+             42: NAp   41   39 (NPrim stop)
+             40: NAp   42   22 (NSupercomb printCons)
+            ]
+~~~
+Dopo aver 'aperto' tutte quante le applicazioni si arriva al nodo *NPrim caselist*, il quale necessita di 3 argomenti: lista (main), caso base (stop), caso ricorsivo (printCons), dato che il main non è ancora stato valutato si archivia lo stack nel dump e si pone nel nuovo stack l'indirizzo corrispondente al main che verrà valutato.
+~~~
+   7) Stk [   1: NSupercomb main
+            ]
+      
+   8) Stk [   1: NAp   45   46 (NPrim Pack)
+            ]
+      
+   9) Stk [  45: NAp   43   44 (NNum 5)
+              1: NAp   45   46 (NPrim Pack)
+            ]
+      
+  10) Stk [  43: NPrim Pack
+             45: NAp   43   44 (NNum 5)
+              1: NAp   45   46 (NPrim Pack)
+            ]
+      
+  11) Stk [   1: NData 2 2
+            ]
+~~~
+Ora che il main è stato valutato, possiamo riprendere dal dump lo stack precedente e ripartire dove ci eravamo interrotti.
+~~~
+  12) Stk [  41: NAp   37    1 (NData 2 2)
+             42: NAp   41   39 (NPrim stop)
+             40: NAp   42   22 (NSupercomb printCons)
+            ]
+      
+  13) Stk [  37: NPrim caseList
+             41: NAp   37    1 (NData 2 2)
+             42: NAp   41   39 (NPrim stop)
+             40: NAp   42   22 (NSupercomb printCons)
+            ]
+~~~
+Ora ci troviamo nella stessa situazione incontrata nello step 6, solo che ora il nodo 1 è valutato quindi si può applicare la regola di caseList chiamando *primCaseList* che visto che la lista non è vuota applica *printCons* alla lista creando l'applizazione e mettendola nello stack
+~~~
+  14) Stk [  40: NAp   47   46 (NPrim Pack)
+            ]
+~~~
+ecco l'applicazione che viene 'aperta' usando apStep 
+~~~  
+  15) Stk [  47: NAp   22   44 (NNum 5)
+             40: NAp   47   46 (NPrim Pack)
+            ]
+      
+  16) Stk [  22: NSupercomb printCons
+             47: NAp   22   44 (NNum 5)
+             40: NAp   47   46 (NPrim Pack)
+            ]
+~~~
+ora che l'applicazione è aperta si applica la definizione di *printCons* definita in *extraPreludeDefs* utilizzando *scStep*, quello che farà questa funzione è applicare la primitiva *print* alla testa della lista e applicare *printList* alla coda
+~~~
+  17) Stk [  40: NAp   48   49 (NAp 21 46)
+            ]
+      
+  18) Stk [  48: NAp   38   44 (NNum 5)
+             40: NAp   48   49 (NAp 21 46)
+            ]
+      
+  19) Stk [  38: NPrim print
+             48: NAp   38   44 (NNum 5)
+             40: NAp   48   49 (NAp 21 46)
+            ]
+  ~~~
+  Ora che l'applicazione di *printCons* è stata 'aperta' applichiamo la primitiva *print* che metterà il numero in testa alla lista nell'output e metterà nello stack l'applicazione di *printList* sul resto della lista
+  ~~~   
+  20) Stk [  49: NAp   21   46 (NPrim Pack)
+            ]
+      
+  21) Stk [  21: NSupercomb printList
+             49: NAp   21   46 (NPrim Pack)
+            ]
+~~~
+Come prima chiamiamo *scStep* per istanziare il body di *printList*  
+~~~
+  22) Stk [  49: NAp   51   22 (NSupercomb printCons)
+            ]
+      
+  23) Stk [  51: NAp   50   39 (NPrim stop)
+             49: NAp   51   22 (NSupercomb printCons)
+            ]
+      
+  24) Stk [  50: NAp   37   46 (NPrim Pack)
+             51: NAp   50   39 (NPrim stop)
+             49: NAp   51   22 (NSupercomb printCons)
+            ]
+      
+  25) Stk [  37: NPrim caseList
+             50: NAp   37   46 (NPrim Pack)
+             51: NAp   50   39 (NPrim stop)
+             49: NAp   51   22 (NSupercomb printCons)
+            ]
+   ~~~
+   Nuovamente ci troviamo con l'applicazione di *caseList* che però contiene una lista non ancora valutata (46) quindi si procede a mettere lo stack corrente nel dump e a valutare la lista
+   ~~~
+  26) Stk [  46: NPrim Pack
+            ]
+      
+  27) Stk [  46: NData 1 0
+            ]
+      
+  28) Stk [  50: NAp   37   46 (NData 1 0)
+             51: NAp   50   39 (NPrim stop)
+             49: NAp   51   22 (NSupercomb printCons)
+            ]
+
+  29) Stk [  37: NPrim caseList
+             50: NAp   37   46 (NData 1 0)
+             51: NAp   50   39 (NPrim stop)
+             49: NAp   51   22 (NSupercomb printCons)
+            ]
+   ~~~
+   Ora che la lista è valutata possiamo applicare *caseList*, visto che NData 1 0 corrisponde alla lista vuota viene messa in cima allo stack la primitiva *stop* che svuoterà lo stack mettendo così il programma in uno stato finale
+   ~~~  
+  30) Stk [  49: NPrim stop
+            ]
+      
+  31) Stk [ ]
+
+
+Main = 5
+~~~
+Ecco il risultato dell'esecuzione, viene stampata la lista formata solo dal valore 5.
 ### Garbage Collector
 
 Il garbage collector ha il compito di eliminare i nodi che non vengono utilizzati ed è rappresentato dalla funzione *gc*, questa viene chiamata da *doAdmin* prima di fare uno step se l'heap contiene un numero di nodi troppo elevato.
