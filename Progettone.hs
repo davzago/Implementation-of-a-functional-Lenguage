@@ -136,7 +136,7 @@ eval state = state : rest_states
              next_states = doAdmin (step state)
 
 doAdmin :: TiState -> TiState
-doAdmin state | hSize heap > 1000 = applyToStats tiStatIncSteps (gc state)
+doAdmin state | hSize heap > 10000 = applyToStats tiStatIncSteps (gc state)
               | otherwise = applyToStats tiStatIncSteps state
               where (_, _, _, heap, _, _) = state
               
@@ -352,9 +352,11 @@ primNeg (output, (a:a1:stack), dump, heap, globals, stats) | isDataNode node = (
                                                            
 primIf :: TiState -> TiState
 primIf (output, (primif:a1:a2:a3:stack), dump, heap, globals, stats) = case cond of 
-                                                                         (NData 1 []) -> (output, a_else:stack, dump, hUpdate heap a3 (hLookup heap a_else), globals, stats)
-                                                                         (NData 2 []) -> (output, a_then:stack, dump, hUpdate heap a3 (hLookup heap a_then), globals, stats)
-                                                                         _            -> (output, a_cond:[], (primif:a1:a2:a3:stack):dump, heap, globals, stats)
+                                                                         (NData 1 []) -> (output, a3:stack, dump, hUpdate heap a3 (hLookup heap a_else), globals, stats)
+                                                                         (NData 2 []) -> (output, a2:stack, dump, hUpdate heap a2 (hLookup heap a_then), globals, stats)
+                                                                         _  
+                                                                           |  isDataNode cond      -> error "Wrong type for a condition"
+                                                                           |  otherwise            -> (output, a_cond:[], (primif:a1:a2:a3:stack):dump, heap, globals, stats)
                                                                      where 
                                                                            cond = hLookup heap a_cond
                                                                            a_cond: a_then : a_else : [] = getargs heap (primif:a1:a2:a3:[])
@@ -596,7 +598,7 @@ in
 fst (snd (snd (snd a))) ;
 main = f 3 4-}
 
-{-"main = letrec a = pair x b ; b = pair y a in fst (snd (snd (snd a)))"-}
+{-"pair x y f = f x y ; main = letrec a = pair x b ; b = pair y a in fst (snd (snd (snd a)))"-}
 
 {- 
 x = 5

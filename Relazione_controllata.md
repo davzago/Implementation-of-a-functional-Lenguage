@@ -48,7 +48,7 @@ data Node = NAp Addr Addr
 - NData rappresenta un oggetto
 - NMarked rappresenta un nodo marchiato che non deve essere eliminato dal garbage collector
 
-Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e discutiamo la sua esecuzione. 
+Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e discutiamo la sua esecuzione andando a guardare lo stack tra uno step e l'altro. 
 
 ~~~ 
    1) Stk [   1: NSupercomb main
@@ -89,7 +89,7 @@ Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e d
    Total number of steps = 8
 ~~~
 
-La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finché non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione corretta, in questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che istanzia nello heap il corpo del supercombinator e imposta il suo indirizzo come radice che deve essere aggiornata una volta valutata l'espressione.
+La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finché non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione adeguata. In questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che istanzia nello heap il corpo del supercombinator utilizzando la funzione *istantiateAndUpdate*, questa prende in input l'indirizzo del nodo rappresentante nello heap il supercombinator e verrà utilizzato per aggiornare il suddetto nodo con quello del body istanziato.
 Una volta istanziato il supercombinator si nota che nello stack è presente una applicazione dunque viene chiamata la funzione *apStep* che descatola il suo primo argomento, questo viene fatto da 2) a 5) dove si trova il supercombinator S in cima allo stack, in questo stato viene dunque chiamata nuovamente *scStep* che procede ad istanziare il corpo di S definito in questo modo nelle definizioni del prelude:
 
 ~~~
@@ -102,12 +102,10 @@ In pratica la funzione S prende due funzioni ed un argomento e crea questa appli
 ("K", ["x","y"], EVar "x")
 ~~~
 
+
 Dunque il body di questo supercombinator è semplicemente una Evar x che per mano di *instantiateAndUpdate* viene collegata all'argomento corretto da *getargs*, ovvero NNum 3, la radice viene quindi aggiornata a questo valore.
+Il secondo argomento della funzione non viene valutato in quanto non presente nel body, questo perché il linguaggio è lazy.
 Nella successiva chiamata di step *TiFinal* ci dice che ci troviamo in uno stato finale in quanto nello stack c'è un solo indirizzo di un numero e il dump è vuoto quindi la valutazione termina.  
-
-Tra le varie istanziazioni di espressioni la più difficoltosa è quella di let, specialmente nel caso ricorsivo quando alcune definizioni possono formare dei cicli. Il problema è che quando si sta istanziando una definizione potrebbe essere necessaria l'associazione nome indirizzo di altre definizioni non ancora istanziate. Questo problema è stato risolto grazie al fatto che haskell è lazy, quindi nel caso ricorsivo quando si sta allocando una definizione viene passata la lista di associazioni nome indirizzo aumentata con tutte le definizioni anche se effettivamente nessuna di esse è ancora stata creata. In un linguaggio non lazy sarebbe stato necessario fare questa cosa a mano tenendo degli indirizzi da parte per poi poter allocare la definizione.
-
-
 
 ### Aritmetica
 
@@ -119,28 +117,57 @@ data Primitive = Neg | Add | Sub | Mul | Div | PrimConstr Tag Arity
                 | PrimCasePair | Abort | PrimCaseList | Stop | Print
 ~~~
 
-Per prima cosa creiamo una lista di associazioni nome-primitiva, ad esempio '+' corrisponderà alla primitiva Add, il compilatore attraverso la chiamata *buildInitialHeap* alloca nello heap tutte le primitive utilizzando il tipo di dato Nprim, nel caso della somma il nodo allocato sarà NPrim '+' Add. Inoltre TiGlobals conterrà l'associazione nome indirizzo che permette di mappare il simbolo '+' all'indirizzo del nodo corrispondente nello heap, in questo modo quando il parser instanzierà una EVar '+' potremo mettere quell'indirizzo sulla cima dello stack.  
+Per prima cosa creiamo una lista di associazioni nome-primitiva:
 
-di seguito mostriamo un esempio di esecuzione del programma "main = 3 + 2"
+~~~ haskell
+primitives = [ ("negate", Neg),
+               ("+", Add),
+               ("-", Sub), 
+               ("*", Mul), 
+               ("/", Div), 
+               ("if", If), 
+               (">", Greater), 
+               (">=",GreaterEq), 
+               ("<",Less), 
+               ("<=",LessEq), 
+               ("==",Eq), 
+               ("/=",NotEq),
+               ("casePair", PrimCasePair),
+               ("abort", Abort),
+               ("caseList", PrimCaseList),
+               ("print", Print),
+               ("stop", Stop)
+             ]
+~~~
+
+EAP (EAP (+ 5  6) )
+
+((+ (+ 5 6)) 7)
+
+
+
+Il compilatore attraverso la chiamata *buildInitialHeap* alloca nello heap tutte le primitive utilizzando il tipo di dato NPrim, nel caso della somma il nodo allocato sarà NPrim '+' Add. Inoltre TiGlobals conterrà l'associazione nome indirizzo che permette di mappare il simbolo '+' all'indirizzo del nodo corrispondente nello heap, in questo modo quando il parser ritornerà l'espressione EVar '+' potremo recuperare nello heap il nodo della corrispondente primitiva.  
+
+Di seguito mostriamo un esempio di esecuzione del programma "main = 3 + 2"
 
 ~~~ 
 ) Stk [   1: NSupercomb main
             ]
 ~~~
-Qui viene applicato scStep in quanto in cima allo stack abbiamo un supercombiantor.
+Qui viene applicato *scStep* in quanto in cima allo stack abbiamo un supercombinator.
 ~~~
       
    1) Stk [   1: NAp   42   43 (NNum 2)
             ]
 ~~~
-Viene poi applicata la regola per le applicazioni usando apStep che non fa altro che mettere in cima allo stack il primo argomento dell'applicazione
+Viene poi applicata la regola per le applicazioni usando *apStep* che non fa altro che mettere in cima allo stack il primo argomento dell'applicazione.
 ~~~
 
    2) Stk [  42: NAp   24   41 (NNum 3)
               1: NAp   42   43 (NNum 2)
             ]
 ~~~
-apStep viene applicato nuovamente
+apStep viene applicato nuovamente.
 ~~~
       
    3) Stk [  24: NPrim +
@@ -148,7 +175,7 @@ apStep viene applicato nuovamente
               1: NAp   42   43 (NNum 2)
             ]
 ~~~
-Visto che abbiamo trovato la primitiva '+' applichiamo la regola corrispondete chiamando primStep che a sua volta chiamerà *primArith state +* che si occupa di recuperare gli argmenti delle applicazioni di indirizzo 42 e 1, ossia i numeri 3 e 2 per poi applicarvi l'operatore + e sostituire all'indirizzo 1 il risultato.
+Visto che abbiamo trovato la primitiva '+' applichiamo la regola corrispondete chiamando *primStep* che a sua volta chiamerà *primArith state +* che si occupa di recuperare gli argomenti delle applicazioni di indirizzo 42 e 1, ossia i numeri 3 e 2 per poi applicarvi l'operatore + e sostituire all'indirizzo 1 il risultato. 
 ~~~
       
    4) Stk [   1: NNum 5
@@ -157,12 +184,13 @@ Visto che abbiamo trovato la primitiva '+' applichiamo la regola corrispondete c
 Total number of steps = 4
 ~~~
 
-Successivamente per applicare effettivamente queste operazioni viene usata la funzione *primStep* che a seconda della primitiva che viene trovata in cima allo stack decide cosa fare. In generale per le operazioni aritmetiche quello che accade è che se gli argomenti dell'operazione sono valutati si procede con l'operazione altrimenti si procede a valutare gli argomenti mettendo lo stack corrente nel dump e mettendo in cima allo stack l'argomento da valutare.
-Le primitive sono state utilizzate anche per implementare l'If, operazioni booleane e per costruire oggetti.
+Quindi per ciascuna operazione viene usata la funzione *primStep* che a seconda della primitiva che viene trovata in cima allo stack decide cosa fare. In generale per le operazioni aritmetiche quello che accade è che se gli argomenti dell'operazione sono valutati si procede con l'operazione altrimenti si procede a valutare gli argomenti mettendo lo stack corrente nel dump e mettendo in cima allo stack l'argomento da valutare.
+Le primitive sono state utilizzate anche per implementare l'If attraverso la funzione primIf, operazioni booleane con la funzione primComp, e per costruire oggetti come vedremo successivamente.
 
+### Let e LetRec
+Tra le varie istanziazioni di espressioni la più difficoltosa è quella di let, specialmente nel caso ricorsivo quando alcune definizioni possono formare dei cicli. Il problema è che quando si sta istanziando una definizione potrebbe essere necessaria l'associazione nome indirizzo di altre definizioni non ancora istanziate. Questo problema è stato risolto grazie al fatto che haskell è lazy, quindi nel caso ricorsivo quando si sta allocando una definizione viene passata la lista di associazioni nome indirizzo aumentata con tutte le definizioni anche se effettivamente nessuna di esse è ancora stata creata. In un linguaggio non lazy sarebbe stato necessario fare questa cosa a mano tenendo degli indirizzi da parte per poi poter allocare la definizione.
 
-### Let
-Andiamo ora a vedere un esempio di esecuzione della seguente istruzione: *main = let x = 5; y = 6 in x + y*
+Andiamo ora a vedere un esempio di esecuzione della seguente istruzione: *main = let x = 5; y = 6 in x + y* dove il let viene usato in modo non ricorsivo.
 
 ~~~
 1) Stk [   1: NSupercomb main
@@ -184,13 +212,12 @@ Andiamo ora a vedere un esempio di esecuzione della seguente istruzione: *main =
          ]
       
 ~~~
-L'esecuzione riportata è praticamente identica a quella precedente, questo perchè mentre l'operazione è sempre la stessa ovvero una somma ciò che viene gestito in modo leggermente diverso sono le variabili, in questo caso infatti il programma usa il costrutto let che permette di creare delle definizioni che possono essere utilizzate all'interno del body. Il processo di assegnazione non è visibile guardando lo stack 
+L'esecuzione riportata è praticamente identica a quella della somma mostrata precedentemente, questo perchè mentre l'operazione è sempre la stessa, ovvero una somma, ciò che viene gestito in modo leggermente diverso sono le variabili. In questo caso infatti il programma usa il costrutto let che permette di creare delle definizioni che possono essere utilizzate all'interno del body. Il processo di assegnazione non è visibile guardando lo stack. 
 
-L'esecuzione del programma sembra essere uguale alla precedente se guardiamo lo stack ad ogni iterazione, così non è in quanto all'inizio quando si istanzia il body del main abbiamo il costrutto let che permette di creare delle definizioni che possono essere utilizzate all'interno del body.
-Per permettere che questo avvenga inanzitutto queste definizioni vanno istanziate, questo viene fatto utilizzando il caso Let di InstantiateAndUpdate, nel nostro esempio le definizioni sono x = 5 e y = 6, si procede dunque a istanziare ciascuna definizione e successivamente ad aggiungere all'enviroment locale l'associazione nome della definizione e indirizzo del nodo risultante dall'istanziazione della definizione. 
+Per prima cosa le definizioni vanno istanziate, questo viene fatto utilizzando il caso Let di InstantiateAndUpdate, nel nostro esempio le definizioni sono x = 5 e y = 6, si procede dunque a istanziare ciascuna definizione e successivamente ad aggiungere all'enviroment locale l'associazione nome della definizione e indirizzo del nodo risultante dall'istanziazione della definizione. 
 Una volta istanziate le definizioni si procede con l'istanziazione e valutazione del body del costrutto let, ossia nel nostro esempio *x + y*.
 
-Vediamo ora un altro esempio, dove viene mostrato chiaramente l'esecuzione del programma: *main = let y = 4 + 3; x = 4 in x+y* 
+Vediamo ora un altro esempio, dove viene mostrato chiaramente l'esecuzione del programma: *main = let y = 4 + 3; x = 4 in x+y*
 ~~~
 
    1) Stk [   1: NSupercomb main
@@ -259,11 +286,11 @@ Ora che la valutazione degli argomenti è completa lo stack precedente viene est
       
   11)   Stk [   1: NNum 11
             ]
+  ~~~
 
-Il Core lenguage permette anche di creare delle definizioni ricorsive all'interno della clausola let, riportiamo e discutiamo quindi l'esecuzione del codice: *main = letrec f = x + 3; x = 4 in f*
+Ora riportiamo e discutiamo l'esecuzione del codice: *main = letrec f = x + 3; x = 4 in f*, questo programma necessita l'utilizzo di letrec in quanto la definizione di f dipende dalla definizione di x.
 
-
-
+~~~
    1) Stk [   1: NSupercomb main
             ]
   ~~~
@@ -291,9 +318,179 @@ Il Core lenguage permette anche di creare delle definizioni ricorsive all'intern
 
 Il caso ricorsivo è più complesso in quanto tutti i bindings nome-indirizzo devono essere prodotti prima di istanziare le definizioni, per fare ciò abbiamo sfruttato il fatto che haskell è lazy e quindi non valuta le espressioni a meno che non sia strettamente necessario. In particolare in *istantiateAndUpdate* nel caso ricorsivo di Elet istanzia la parte destra delle definizioni utilizzando i bindings (env1) che in pratica devono ancora essere creati, questo è possibile perchè nella chiamata di *instantiateDef* la funzione instantiate non viene immediatamente chiamata ma viene momentaneamente ritornata la tupla (heap',(name,addr)) dove solamente name è effettivamente valutata. Questo procedimento è eseguito nel primo passo di esecuzione dove il supercombinator main viene istanziato utilizzando *scStep*.
 
+Andiamo ora a vedere un esempio di letrec dove le definizioni formano un ciclo in quanto sono dipendenti tra loro, eseguendo l'esempio:
+*pair x y f = f x y ; fs p = p K ; sn p = p K1 ; f x y = letrec a = pair x b ; b = pair y a in fs (sn a) ; main = f 3 4*
 
+~~~
+   1) Stk [   5: NSupercomb main
+            ]
+      
+   2) Stk [   5: NAp   46   47 (NNum 4)
+            ]
+      
+   3) Stk [  46: NAp    4   45 (NNum 3)
+              5: NAp   46   47 (NNum 4)
+            ]
+      
+   4) Stk [   4: NSupercomb f
+             46: NAp    4   45 (NNum 3)
+              5: NAp   46   47 (NNum 4)
+            ]
+      
+   5) Stk [   5: NAp    2   52 (NAp 3 49)
+            ]
+      
+   6) Stk [   2: NSupercomb fs
+              5: NAp    2   52 (NAp 3 49)
+            ]
+      
+   7) Stk [   5: NAp   52    7 (NSupercomb K)
+            ]
+      
+   8) Stk [  52: NAp    3   49 (NAp 48 51)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+   9) Stk [   3: NSupercomb sn
+             52: NAp    3   49 (NAp 48 51)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  10) Stk [  52: NAp   49    8 (NSupercomb K1)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  11) Stk [  49: NAp   48   51 (NAp 50 49)
+             52: NAp   49    8 (NSupercomb K1)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  12) Stk [  48: NAp    1   45 (NNum 3)
+             49: NAp   48   51 (NAp 50 49)
+             52: NAp   49    8 (NSupercomb K1)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  13) Stk [   1: NSupercomb pair
+             48: NAp    1   45 (NNum 3)
+             49: NAp   48   51 (NAp 50 49)
+             52: NAp   49    8 (NSupercomb K1)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  14) Stk [  52: NAp   53   51 (NAp 50 49)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  15) Stk [  53: NAp    8   45 (NNum 3)
+             52: NAp   53   51 (NAp 50 49)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  16) Stk [   8: NSupercomb K1
+             53: NAp    8   45 (NNum 3)
+             52: NAp   53   51 (NAp 50 49)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  17) Stk [  52: NInd   51
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  18) Stk [  51: NAp   50   49 (NAp 48 51)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  19) Stk [  50: NAp    1   47 (NNum 4)
+             51: NAp   50   49 (NAp 48 51)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  20) Stk [   1: NSupercomb pair
+             50: NAp    1   47 (NNum 4)
+             51: NAp   50   49 (NAp 48 51)
+              5: NAp   52    7 (NSupercomb K)
+            ]
+      
+  21) Stk [   5: NAp   54   49 (NAp 48 51)
+            ]
+      
+  22) Stk [  54: NAp    7   47 (NNum 4)
+              5: NAp   54   49 (NAp 48 51)
+            ]
+      
+  23) Stk [   7: NSupercomb K
+             54: NAp    7   47 (NNum 4)
+              5: NAp   54   49 (NAp 48 51)
+            ]
+      
+  24) Stk [   5: NInd   47
+            ]
+      
+  25) Stk [  47: NNum 4
+            ]
+~~~
+### Case
 Questa implementazione non gestisce le Case expressions, dunque per gestire gli oggetti vengono utilizzati i costrutti if casePair e caseList, oggetti più generici invece non possono esssere gestiti.
+### If
 
+~~~
+   1) Stk [   1: NSupercomb main
+            ]
+      
+   2) Stk [   1: NAp   47   48 (NNum 6)
+            ]
+      
+   3) Stk [  47: NAp   45   46 (NNum 5)
+              1: NAp   47   48 (NNum 6)
+            ]
+      
+   4) Stk [  45: NAp   28   44 (NAp 42 43)
+             47: NAp   45   46 (NNum 5)
+              1: NAp   47   48 (NNum 6)
+            ]
+      
+   5) Stk [  28: NPrim if
+             45: NAp   28   44 (NAp 42 43)
+             47: NAp   45   46 (NNum 5)
+              1: NAp   47   48 (NNum 6)
+            ]
+~~~
+Possiamo vedere che sulla cima dello stack ci sia l'indirizzo della primitiva If, quindi viene chiamata la funzione *primIf*, questa si aspetta tre argomenti, come quelli presenti nello stack: 44, 46, 48, che sono rispettivamente la condizione dell'if, il ramo del then e quello dell'else. La funzione *primIf* vedendo che la condizione (44) non è stata valutata, sposta lo stack corrente nel dump e inserisce nello stack vuoto l'indirizzo della condizione da valutare.
+~~~
+    
+   6) Stk [  44: NAp   42   43 (NNum 2)
+            ]
+      
+   7) Stk [  42: NAp   29   41 (NNum 1)
+             44: NAp   42   43 (NNum 2)
+            ]
+      
+   8) Stk [  29: NPrim >
+             42: NAp   29   41 (NNum 1)
+             44: NAp   42   43 (NNum 2)
+            ]
+~~~
+Possiamo vedere che sulla cima dello stack ci sia l'indirizzo della primitiva >, quindi viene chiamata la funzione *primComp*, la quale si aspetta due argomenti, in questo caso sono già entrambi valutati, quindi esegue l'operazione 1 > 2 ritornando NData 1 0, ossia falso.
+~~~
+
+   9) Stk [  44: NData 1 0
+            ]
+      
+  10) Stk [  28: NPrim if
+             45: NAp   28   44 (NData 1 0)
+             47: NAp   45   46 (NNum 5)
+              1: NAp   47   48 (NNum 6)
+            ]
+~~~
+Ora che la condizione è stata valutata si può eseguire l'if e dato che la condizione è falsa si tolgono gli indirizzi dell'if e si inserisce quello del ramo dell'else, ossia il numero 6.
+~~~
+      
+  11) Stk [  1: NNum 6
+            ]
+~~~
+
+## Strutture dati
 Le strutture dati vengono costruite utilizzando Pack{t,a} dove t è la tag mentre a è il numero di argomenti, questo costrutto è stato rappresentato con la primitiva *PrimConstr t a* quindi possiamo istanziare una espressione EConstr nell'heap come *NPrim "Pack" (PrimConstr t a)*. Abbiamo quindi aggiunto un caso a *primStep* per poter gestire la nuova primitiva che utilzza la funzione ausiliaria *primConstr* che si occupa di controllare se al costruttore vengono dati abbastanza argomenti, se questo è vero allora viene istanziato un oggetto nell'heap che sarà rappresentato dal tipo di nodo NDdata che conterrà il tag e l'indirizzo dei vari argomenti.
 
 Per rappresentare True e False abbiamo utilizzato rispettivamente Pack{2,0} e Pack{1,0} inserendo le definizioni in *extraPreludeDefs*.
