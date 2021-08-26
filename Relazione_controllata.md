@@ -19,7 +19,7 @@ Il compilatore prende in input la lista di espressioni fornite dal parser e si o
 - **Heap:** Una collezione di coppie chiave valore dove la chiave è un indirizzo e il valore è un nodo che identifica la tipologia di una espressione;
 - **Globals:** Una collezione che collega il nome di una definizione con il suo indirizzo nello heap;
 
-Lo stato iniziale è formato da uno stack che contiene l'indirizzo del main (definizione obbligatoria per ogni programma), dump vuoto, heap contenente tutte le definizioni iniziali, ovvero le definizioni del programma, e le definizioni del prelude, infine globals contiene il nome di ogni definizione con associato il suo indirizzo nello heap.
+Lo stato iniziale è formato da uno stack che contiene l'indirizzo del main (definizione obbligatoria per ogni programma), dump vuoto, heap contenente tutte le definizioni iniziali, che verranno spiegate in seguito, infine globals contiene il nome di ogni definizione con associato il suo indirizzo nello heap.
 
 
 ### Valutatore
@@ -47,6 +47,8 @@ data Node = NAp Addr Addr
 - NPrim rappresenta una operazione primitiva 
 - NData rappresenta un oggetto
 - NMarked rappresenta un nodo marchiato che non deve essere eliminato dal garbage collector
+
+Quando il compilatore crea l'heap iniziale inserisce tutte le definizioni del programma, del prelude e dell'extraprelude sotto forma di nodi di tipo NSupercomb, e le operazioni primitive sotto forma di nodi di tipo NPrim.
 
 Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e discutiamo la sua esecuzione andando a guardare lo stack tra uno step e l'altro. 
 
@@ -90,6 +92,12 @@ Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e d
 ~~~
 
 La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finché non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione adeguata. In questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che istanzia nello heap il corpo del supercombinator utilizzando la funzione *istantiateAndUpdate*, questa prende in input l'indirizzo del nodo rappresentante nello heap il supercombinator e verrà utilizzato per aggiornare il suddetto nodo con quello del body istanziato.
+
+~~~
+("main",[],EAp (EAp (EAp (EVar "S") (EVar "K")) (EVar "K")) (ENum 3))
+~~~
+
+Durante l'istanziazione del body se viene trovata una espressione EVar questa viene cercata nella lista di associazione nome-indirizzo (enviroment) e in questo caso viene riconosciuta come supercombinator.
 Una volta istanziato il supercombinator si nota che nello stack è presente una applicazione dunque viene chiamata la funzione *apStep* che descatola il suo primo argomento, questo viene fatto da 2) a 5) dove si trova il supercombinator S in cima allo stack, in questo stato viene dunque chiamata nuovamente *scStep* che procede ad istanziare il corpo di S definito in questo modo nelle definizioni del prelude:
 
 ~~~
@@ -324,7 +332,10 @@ Andiamo ora a vedere un esempio di letrec dove le definizioni formano un ciclo i
 ~~~
    1) Stk [   5: NSupercomb main
             ]
-      
+~~~
+Sulla cima dello stack troviamo un super combinator quindi viene applicato *scStep*.
+~~~
+        
    2) Stk [   5: NAp   46   47 (NNum 4)
             ]
       
@@ -336,98 +347,110 @@ Andiamo ora a vedere un esempio di letrec dove le definizioni formano un ciclo i
              46: NAp    4   45 (NNum 3)
               5: NAp   46   47 (NNum 4)
             ]
+~~~
+Dopo qualche applicazione di *apStep* troviamo il supercombinator f a cui applichiamo *scStep* che istanzierà il suo body, si tratta di un letrc quindi verranno istanziate le sue definizioni e il suo corpo.
+In questo caso le definzioni fanno riferimento l'una all'altra ma non è un problema perchè la cosa è stata gestita come descritto in precedenza. 
+~~~
       
-   5) Stk [   5: NAp    2   52 (NAp 3 49)
+   1) Stk [   5: NAp    2   52 (NAp 3 49)
             ]
       
-   6) Stk [   2: NSupercomb fs
+   2) Stk [   2: NSupercomb fs
               5: NAp    2   52 (NAp 3 49)
             ]
-      
-   7) Stk [   5: NAp   52    7 (NSupercomb K)
+~~~
+Viene applicato al supercombinator fs la funzion *scStep*, fs si aspetta un argomento il quale nodo (52) e crea l'applicazione (p K)
+~~~    
+   3) Stk [   5: NAp   52    7 (NSupercomb K)
             ]
-      
-   8) Stk [  52: NAp    3   49 (NAp 48 51)
+
+   4) Stk [  52: NAp    3   49 (NAp 48 51)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-   9) Stk [   3: NSupercomb sn
+   5) Stk [   3: NSupercomb sn
              52: NAp    3   49 (NAp 48 51)
               5: NAp   52    7 (NSupercomb K)
             ]
-      
-  10) Stk [  52: NAp   49    8 (NSupercomb K1)
+~~~
+Dopo un certo numero di applicazioni, troviamo il supercombinator sn a cui applichiamo *scStep*, questo aspetta un input che sarà il nodo (49) e crea l'applicazione (p K1) che è innestata in questo modo: (p K1) K, nei prossimi step "aprirà" il costrutto p.
+~~~
+  1)  Stk [  52: NAp   49    8 (NSupercomb K1)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  11) Stk [  49: NAp   48   51 (NAp 50 49)
+  2)  Stk [  49: NAp   48   51 (NAp 50 49)
              52: NAp   49    8 (NSupercomb K1)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  12) Stk [  48: NAp    1   45 (NNum 3)
+  3)  Stk [  48: NAp    1   45 (NNum 3)
              49: NAp   48   51 (NAp 50 49)
              52: NAp   49    8 (NSupercomb K1)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  13) Stk [   1: NSupercomb pair
+  4)  Stk [   1: NSupercomb pair
              48: NAp    1   45 (NNum 3)
              49: NAp   48   51 (NAp 50 49)
              52: NAp   49    8 (NSupercomb K1)
               5: NAp   52    7 (NSupercomb K)
             ]
-      
-  14) Stk [  52: NAp   53   51 (NAp 50 49)
+~~~
+Dopo diverse chiamate di *apStep*, abbiamo raggiunto il costrutto pair che prenderà tre argomenti, x y f, rispettivamente i nodi (45) (51) (8), si applica *scStep*, il quale istanzia il body andando a creare l'applicazione (f x) y
+~~~
+  5)  Stk [  52: NAp   53   51 (NAp 50 49)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  15) Stk [  53: NAp    8   45 (NNum 3)
+  6)  Stk [  53: NAp    8   45 (NNum 3)
              52: NAp   53   51 (NAp 50 49)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  16) Stk [   8: NSupercomb K1
+  7)  Stk [   8: NSupercomb K1
              53: NAp    8   45 (NNum 3)
              52: NAp   53   51 (NAp 50 49)
               5: NAp   52    7 (NSupercomb K)
             ]
-      
-  17) Stk [  52: NInd   51
+~~~
+Dopo diverse chiamate ad *apStep*, troviamo il supercominator K1, che si aspetta 2 parametri, *scStep* ne istanzia il body andando a sostituirgli il secondo parametro, ossia il nodo 51 con una indirezion, questo perché .
+~~~
+  8)  Stk [  52: NInd   51
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  18) Stk [  51: NAp   50   49 (NAp 48 51)
+  9)  Stk [  51: NAp   50   49 (NAp 48 51)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  19) Stk [  50: NAp    1   47 (NNum 4)
+  10) Stk [  50: NAp    1   47 (NNum 4)
              51: NAp   50   49 (NAp 48 51)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  20) Stk [   1: NSupercomb pair
+  11) Stk [   1: NSupercomb pair
              50: NAp    1   47 (NNum 4)
              51: NAp   50   49 (NAp 48 51)
               5: NAp   52    7 (NSupercomb K)
             ]
       
-  21) Stk [   5: NAp   54   49 (NAp 48 51)
+  12) Stk [   5: NAp   54   49 (NAp 48 51)
             ]
       
-  22) Stk [  54: NAp    7   47 (NNum 4)
+  13) Stk [  54: NAp    7   47 (NNum 4)
               5: NAp   54   49 (NAp 48 51)
             ]
       
-  23) Stk [   7: NSupercomb K
+  14) Stk [   7: NSupercomb K
              54: NAp    7   47 (NNum 4)
               5: NAp   54   49 (NAp 48 51)
             ]
       
-  24) Stk [   5: NInd   47
+  15) Stk [   5: NInd   47
             ]
       
-  25) Stk [  47: NNum 4
+  16) Stk [  47: NNum 4
             ]
 ~~~
 ### Case

@@ -136,7 +136,7 @@ eval state = state : rest_states
              next_states = doAdmin (step state)
 
 doAdmin :: TiState -> TiState
-doAdmin state | hSize heap > 10000 = applyToStats tiStatIncSteps (gc state)
+doAdmin state | hSize heap > 2 = applyToStats tiStatIncSteps (gc state)
               | otherwise = applyToStats tiStatIncSteps state
               where (_, _, _, heap, _, _) = state
               
@@ -177,7 +177,7 @@ markStateMachine f b h = case (node, hIsnull b) of
                            (NInd a, _) -> markStateMachine f b (hUpdate h f (hLookup h a)) -- markStateMachine a b h
                            (NData t [], _) -> markStateMachine f b (hUpdate h f (NMarked (Done) (NData t [])))
                            (NData t (a:args), _) -> markStateMachine a f (hUpdate h f (NMarked (Visits 1) (NData t (b:args)))) 
-                           (NMarked (Done) n, False) -> 
+                           (NMarked (_) n, False) -> 
                                  case back_node of 
                                        (NMarked (Visits 1) (NAp b' a2)) -> markStateMachine a2 b (hUpdate h b (NMarked (Visits 2) (NAp f b')))  
                                        (NMarked (Visits 2) (NAp a1 b')) -> markStateMachine b b' (hUpdate h b (NMarked (Done) (NAp a1 f)))
@@ -244,6 +244,7 @@ tiFinal state = False -- Stack contains more than one item
 isDataNode :: Node -> Bool
 isDataNode (NNum n) = True
 isDataNode (NData t a) = True
+
 isDataNode _ = False
 
 step :: TiState -> TiState
@@ -382,7 +383,7 @@ primComp state f = primDyadic state (\(NNum x) (NNum y) -> if f x y then (NData 
 primDyadic :: TiState -> (Node -> Node -> Node) -> TiState
 primDyadic (output, (a:a1:a2:stack), dump, heap, globals, stats) f | isDataNode node1 && isDataNode node2 = (output, (a2:stack), dump, hUpdate heap a2 (f node1 node2), globals, stats)
                                                                    | not (isDataNode node1) = (output, (addr1:[]), (a1:a2:stack):dump, heap, globals, stats)
-                                                                   | not (isDataNode node2) = (output, (addr2:[]), (a1:a2:stack):dump, heap, globals, stats)
+                                                                   | not (isDataNode node2) = (output, (addr2:[]), (a2:stack):dump, heap, globals, stats)
                                                                    where 
                                                                          node1 = hLookup heap addr1
                                                                          node2 = hLookup heap addr2
@@ -504,7 +505,6 @@ showStats :: TiState -> Iseq
 showStats (output, stack, dump, heap, globals, stats) = iConcat ([ iNewline, iNewline, iStr "Total number of steps = ", iNum (tiStatGetSteps stats), iNewline, iStr "Main = "] ++ (map (\n -> iAppend (iNum n) (iStr " ")) output))
 
 --showResults (eval (compile (parseProg "main = S K K 3"))) 
-
 readF :: IO String
 readF = do inh <- openFile "input.txt" ReadMode
            prog <- readloop inh
