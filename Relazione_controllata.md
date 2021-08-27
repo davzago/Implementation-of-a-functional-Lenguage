@@ -1,6 +1,6 @@
 # Template Instantiation
 
-Il progetto che abbiamo realizzato è basato sul secondo capitolo del libro "implementing functional lenguages", in particolare ci siamo focalizzati su un interprete basato su template instantiation. L'obbiettivo della nostra implementazione è quello di eseguire un programma scritto in Core Language. Ogni programma, scritto usando un linguaggio funzionale, è formato da una o più espressioni le quali devono essere valutate. Ciascuna espressione è rappresentata da un grafo e per valutarla bisogna fare una serie di riduzioni fino a raggiungere la forma normale.
+Il progetto che abbiamo realizzato è basato sul secondo capitolo del libro "Implementing functional lenguages", in particolare ci siamo focalizzati su un interprete basato su template instantiation. L'obbiettivo della nostra implementazione è quello di eseguire un programma scritto in Core Language. Ogni programma, scritto usando un linguaggio funzionale, è formato da una o più espressioni le quali devono essere valutate. Ciascuna espressione è rappresentata da un grafo e per valutarla bisogna fare una serie di riduzioni fino a raggiungere la forma normale.
 
 ## Componenti del programma
 
@@ -8,7 +8,7 @@ Di seguito descriviamo quali sono le componenti del programma e a cosa servono.
 
 ### Parser
 
-Il parser è il componente che si occupa di elaborare il programma testuale preso come input e di restituire delle espressioni, questo passaggio è fondamentale per controllare che il programma non presenti errori sintattici.
+Il parser è il componente che si occupa di elaborare il programma testuale preso come input e di restituire delle espressioni. Questo passaggio è fondamentale per controllare che il programma non presenti errori sintattici.
 
 ### Compilatore
 
@@ -19,7 +19,7 @@ Il compilatore prende in input la lista di espressioni fornite dal parser e si o
 - **Heap:** Una collezione di coppie chiave valore dove la chiave è un indirizzo e il valore è un nodo che identifica la tipologia di una espressione;
 - **Globals:** Una collezione che collega il nome di una definizione con il suo indirizzo nello heap;
 
-Lo stato iniziale è formato da uno stack che contiene l'indirizzo del main (definizione obbligatoria per ogni programma), dump vuoto, heap contenente tutte le definizioni iniziali, che verranno spiegate in seguito, infine globals contiene il nome di ogni definizione con associato il suo indirizzo nello heap.
+Lo stato iniziale è formato da uno stack che contiene l'indirizzo del main (definizione obbligatoria per ogni programma), dump vuoto, heap contenente tutte le definizioni iniziali, che verranno spiegate in seguito, infine globals contiene il nome di ogni definizione iniziale con associato il suo indirizzo nello heap.
 
 
 ### Valutatore
@@ -91,25 +91,24 @@ Di seguito mostriamo un esempio di esecuzione del programma "main = S K K 3" e d
    Total number of steps = 8
 ~~~
 
-La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finché non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione adeguata. In questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che istanzia nello heap il corpo del supercombinator utilizzando la funzione *istantiateAndUpdate*, questa prende in input l'indirizzo del nodo rappresentante nello heap il supercombinator e verrà utilizzato per aggiornare il suddetto nodo con quello del body istanziato.
-
-~~~
-("main",[],EAp (EAp (EAp (EVar "S") (EVar "K")) (EVar "K")) (ENum 3))
-~~~
+La funzione *compile* per prima cosa mette in cima allo stack l'indirizzo del main, su questo stato quindi viene chiamata la funzione *eval* che procede a chiamare *step* finché non si ottiene uno stato finale, ogni chiamata di *step* chiamerà la funzione adeguata. In questo caso visto che il main è un supercombinator viene chiamata la funzione *scStep* che istanzia nello heap il corpo del supercombinator utilizzando la funzione *istantiateAndUpdate*, in generale questa funzione prende in input:
+- il nodo da istanziare
+- l'indirizzo del nodo da istanziare che verrà utilizzato per sostituire al nodo non istanziato quello istanziato
+- heap corrente
+- enviroment =  bindings + globals, dove i bindings sono l'associazione: nome degli argomenti del supercombinator, indirizzo degli argomenti che *scStep* ha recuperato nell stack
 
 Durante l'istanziazione del body se viene trovata una espressione EVar questa viene cercata nella lista di associazione nome-indirizzo (enviroment) e in questo caso viene riconosciuta come supercombinator.
-Una volta istanziato il supercombinator si nota che nello stack è presente una applicazione dunque viene chiamata la funzione *apStep* che descatola il suo primo argomento, questo viene fatto da 2) a 5) dove si trova il supercombinator S in cima allo stack, in questo stato viene dunque chiamata nuovamente *scStep* che procede ad istanziare il corpo di S definito in questo modo nelle definizioni del prelude:
+Una volta istanziato il supercombinator si nota che nello stack è presente una applicazione, dunque viene chiamata la funzione *apStep* che descatola il suo primo argomento, questo viene fatto da 2) a 5) dove si trova il supercombinator S in cima allo stack, in questo stato viene dunque chiamata nuovamente *scStep* che procede ad istanziare il corpo di S definito in questo modo nelle definizioni del prelude:
 
 ~~~
 ("S", ["f","g","x"], EAp (EAp (EVar "f") (EVar "x")) (EAp (EVar "g") (EVar "x")))
 ~~~
 
-In pratica la funzione S prende due funzioni ed un argomento e crea questa applicazione : f x (g x), visto che si tratta di un' applicazione viene usata nuovamente *apStep* che cerca l'applicazione outermost fino a quando trova K che è un super combinator definito in questo modo:
+In pratica la funzione S prende due funzioni ed un argomento e crea questa applicazione : f x (g x), visto che si tratta di un'applicazione, viene usata nuovamente *apStep* che apre l'applicazione outermost fino a quando trova K che è un supercombinator definito in questo modo:
 
 ~~~
 ("K", ["x","y"], EVar "x")
 ~~~
-
 
 Dunque il body di questo supercombinator è semplicemente una Evar x che per mano di *instantiateAndUpdate* viene collegata all'argomento corretto da *getargs*, ovvero NNum 3, la radice viene quindi aggiornata a questo valore.
 Il secondo argomento della funzione non viene valutato in quanto non presente nel body, questo perché il linguaggio è lazy.
@@ -148,12 +147,6 @@ primitives = [ ("negate", Neg),
              ]
 ~~~
 
-EAP (EAP (+ 5  6) )
-
-((+ (+ 5 6)) 7)
-
-
-
 Il compilatore attraverso la chiamata *buildInitialHeap* alloca nello heap tutte le primitive utilizzando il tipo di dato NPrim, nel caso della somma il nodo allocato sarà NPrim '+' Add. Inoltre TiGlobals conterrà l'associazione nome indirizzo che permette di mappare il simbolo '+' all'indirizzo del nodo corrispondente nello heap, in questo modo quando il parser ritornerà l'espressione EVar '+' potremo recuperare nello heap il nodo della corrispondente primitiva.  
 
 Di seguito mostriamo un esempio di esecuzione del programma "main = 3 + 2"
@@ -188,8 +181,6 @@ Visto che abbiamo trovato la primitiva '+' applichiamo la regola corrispondete c
       
    4) Stk [   1: NNum 5
             ]
-      
-Total number of steps = 4
 ~~~
 
 Quindi per ciascuna operazione viene usata la funzione *primStep* che a seconda della primitiva che viene trovata in cima allo stack decide cosa fare. In generale per le operazioni aritmetiche quello che accade è che se gli argomenti dell'operazione sono valutati si procede con l'operazione altrimenti si procede a valutare gli argomenti mettendo lo stack corrente nel dump e mettendo in cima allo stack l'argomento da valutare.
@@ -225,7 +216,7 @@ L'esecuzione riportata è praticamente identica a quella della somma mostrata pr
 Per prima cosa le definizioni vanno istanziate, questo viene fatto utilizzando il caso Let di InstantiateAndUpdate, nel nostro esempio le definizioni sono x = 5 e y = 6, si procede dunque a istanziare ciascuna definizione e successivamente ad aggiungere all'enviroment locale l'associazione nome della definizione e indirizzo del nodo risultante dall'istanziazione della definizione. 
 Una volta istanziate le definizioni si procede con l'istanziazione e valutazione del body del costrutto let, ossia nel nostro esempio *x + y*.
 
-Vediamo ora un altro esempio, dove viene mostrato chiaramente l'esecuzione del programma: *main = let y = 4 + 3; x = 4 in x+y*
+Vediamo ora un altro esempio, dove viene mostrata l'esecuzione del programma: *main = let y = 4 + 3; x = 4 in x+y*
 ~~~
 
    1) Stk [   1: NSupercomb main
@@ -280,7 +271,7 @@ Qui viene applicato primStep al nodo di indirizzo 24 che termina la valutazione 
    8) Stk [  44: NNum 7
             ]
 ~~~
-Ora che la valutazione degli argomenti è completa lo stack precedente viene estratto dal dump e si procede alla valutazione
+Ora che la valutazione degli argomenti è completa lo stack precedente viene estratto dal dump e si procede alla sua valutazione
 ~~~
       
    9) Stk [  46: NAp   24   45 (NNum 4)
@@ -294,48 +285,20 @@ Ora che la valutazione degli argomenti è completa lo stack precedente viene est
       
   11)   Stk [   1: NNum 11
             ]
-  ~~~
-
-Ora riportiamo e discutiamo l'esecuzione del codice: *main = letrec f = x + 3; x = 4 in f*, questo programma necessita l'utilizzo di letrec in quanto la definizione di f dipende dalla definizione di x.
-
-~~~
-   1) Stk [   1: NSupercomb main
-            ]
-  ~~~
-  Viene istanziato il corpo del main.
-  ~~~
-   
-   2) Stk [   1: NInd   43
-            ]
-      
-   3) Stk [  43: NAp   41   42 (NNum 3)
-            ]
-      
-   4) Stk [  41: NAp   24   44 (NNum 4)
-             43: NAp   41   42 (NNum 3)
-            ]
-      
-   5) Stk [  24: NPrim +
-             41: NAp   24   44 (NNum 4)
-             43: NAp   41   42 (NNum 3)
-            ]
-      
-   6) Stk [  43: NNum 7
-            ]
 ~~~
 
-Il caso ricorsivo è più complesso in quanto tutti i bindings nome-indirizzo devono essere prodotti prima di istanziare le definizioni, per fare ciò abbiamo sfruttato il fatto che haskell è lazy e quindi non valuta le espressioni a meno che non sia strettamente necessario. In particolare in *istantiateAndUpdate* nel caso ricorsivo di Elet istanzia la parte destra delle definizioni utilizzando i bindings (env1) che in pratica devono ancora essere creati, questo è possibile perchè nella chiamata di *instantiateDef* la funzione instantiate non viene immediatamente chiamata ma viene momentaneamente ritornata la tupla (heap',(name,addr)) dove solamente name è effettivamente valutata. Questo procedimento è eseguito nel primo passo di esecuzione dove il supercombinator main viene istanziato utilizzando *scStep*.
+Il caso ricorsivo è più complesso in quanto tutti i bindings nome-indirizzo devono essere prodotti prima di istanziare le definizioni, per fare ciò abbiamo sfruttato il fatto che haskell è lazy e quindi non valuta le espressioni a meno che non sia strettamente necessario. In particolare in *istantiateAndUpdate* nel caso ricorsivo di Elet istanzia la parte destra delle definizioni utilizzando i bindings (env1) che in pratica devono ancora essere creati, questo è possibile perchè nella chiamata di *instantiateDef*  la funzione instantiate non viene immediatamente chiamata ma viene momentaneamente ritornata la tupla (heap',(name,addr)) dove solamente name è effettivamente valutata. Questo procedimento è eseguito nel primo passo di esecuzione dove il supercombinator main viene istanziato utilizzando *scStep*.
 
 Andiamo ora a vedere un esempio di letrec dove le definizioni formano un ciclo in quanto sono dipendenti tra loro, eseguendo l'esempio:
+
 *pair x y f = f x y ; fs p = p K ; sn p = p K1 ; f x y = letrec a = pair x b ; b = pair y a in fs (sn a) ; main = f 3 4*
 
 ~~~
-   1) Stk [   5: NSupercomb main
+1) Stk [   5: NSupercomb main
             ]
 ~~~
-Sulla cima dello stack troviamo un super combinator quindi viene applicato *scStep*.
-~~~
-        
+Sulla cima dello stack troviamo un supercombinator quindi viene applicato *scStep*.
+~~~      
    2) Stk [   5: NAp   46   47 (NNum 4)
             ]
       
@@ -348,111 +311,108 @@ Sulla cima dello stack troviamo un super combinator quindi viene applicato *scSt
               5: NAp   46   47 (NNum 4)
             ]
 ~~~
-Dopo qualche applicazione di *apStep* troviamo il supercombinator f a cui applichiamo *scStep* che istanzierà il suo body, si tratta di un letrc quindi verranno istanziate le sue definizioni e il suo corpo.
+Dopo qualche applicazione di *apStep* troviamo il supercombinator f a cui applichiamo *scStep* che istanzierà il suo body, si tratta di un letrec quindi verranno istanziate le sue definizioni e poi il suo corpo.
 In questo caso le definzioni fanno riferimento l'una all'altra ma non è un problema perchè la cosa è stata gestita come descritto in precedenza. 
 ~~~
-      
-   1) Stk [   5: NAp    2   52 (NAp 3 49)
+   5) Stk [   5: NAp    2   51 (NAp 3 48)
             ]
       
-   2) Stk [   2: NSupercomb fs
-              5: NAp    2   52 (NAp 3 49)
+   6) Stk [   2: NSupercomb fs
+              5: NAp    2   51 (NAp 3 48)
             ]
 ~~~
-Viene applicato al supercombinator fs la funzion *scStep*, fs si aspetta un argomento il quale nodo (52) e crea l'applicazione (p K)
-~~~    
-   3) Stk [   5: NAp   52    7 (NSupercomb K)
+Viene applicato al supercombinator fs la funzion *scStep*, fs si aspetta un argomento che sarà il nodo (51) e crea l'applicazione (p K)
+~~~   
+   7) Stk [   5: NAp   51    7 (NSupercomb K)
             ]
+      
+   8) Stk [  51: NAp    3   48 (NAp 44 50)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+   9) Stk [   3: NSupercomb sn
+             51: NAp    3   48 (NAp 44 50)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+~~~
+Dopo un certo numero di applicazioni, troviamo il supercombinator sn a cui applichiamo *scStep*, questo si aspetta un input che sarà il nodo (48) e crea l'applicazione (p K1) che è innestata in questo modo: (p K1) K, nei prossimi step "aprirà" il costrutto p.
+~~~     
+  10) Stk [  51: NAp   48    8 (NSupercomb K1)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  11) Stk [  48: NAp   44   50 (NAp 49 48)
+             51: NAp   48    8 (NSupercomb K1)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  12) Stk [  44: NAp    1   45 (NNum 3)
+             48: NAp   44   50 (NAp 49 48)
+             51: NAp   48    8 (NSupercomb K1)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  13) Stk [   1: NSupercomb pair
+             44: NAp    1   45 (NNum 3)
+             48: NAp   44   50 (NAp 49 48)
+             51: NAp   48    8 (NSupercomb K1)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+~~~
+Dopo diverse chiamate di *apStep*, abbiamo raggiunto il costrutto pair che prenderà tre argomenti, x y f, rispettivamente i nodi (45) (50) (8), si applica *scStep*, il quale istanzia il body andando a creare l'applicazione (f x) y
+~~~
+  14) Stk [  51: NAp   46   50 (NAp 49 48)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  15) Stk [  46: NAp    8   45 (NNum 3)
+             51: NAp   46   50 (NAp 49 48)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  16) Stk [   8: NSupercomb K1
+             46: NAp    8   45 (NNum 3)
+             51: NAp   46   50 (NAp 49 48)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+~~~
+Dopo diverse chiamate ad *apStep*, troviamo il supercominator K1, che si aspetta 2 parametri, *scStep* ne istanzia il body andando a sostituirgli il secondo parametro, ossia il nodo di indirizzo (50). 
+~~~      
+  17) Stk [  51: NAp   49   48 (NAp 44 50)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  18) Stk [  49: NAp    1   47 (NNum 4)
+             51: NAp   49   48 (NAp 44 50)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+      
+  19) Stk [   1: NSupercomb pair
+             49: NAp    1   47 (NNum 4)
+             51: NAp   49   48 (NAp 44 50)
+              5: NAp   51    7 (NSupercomb K)
+            ]
+~~~
+Dopo diverse chiamate di *apStep*, abbiamo raggiunto il costrutto pair che prenderà tre argomenti, x y f, rispettivamente i nodi (47) (48) (7), si applica *scStep*, il quale istanzia il body andando a creare l'applicazione (f x) y
+~~~
+  20) Stk [   5: NAp   46   48 (NAp 44 50)
+            ]
+      
+  21) Stk [  46: NAp    7   47 (NNum 4)
+              5: NAp   46   48 (NAp 44 50)
+            ]
+      
+  22) Stk [   7: NSupercomb K
+             46: NAp    7   47 (NNum 4)
+              5: NAp   46   48 (NAp 44 50)
+            ]
+~~~
+Dopo diverse chiamate ad *apStep*, troviamo il supercominator K, che si aspetta 2 parametri, *scStep* ne istanzia il body andando a sostituirgli il primo parametro, ossia il nodo di indirizzo (47), e lo sotituisce all'indirizzo (5). 
+~~~      
+  23) Stk [   5: NNum 4
+            ]
+~~~
 
-   4) Stk [  52: NAp    3   49 (NAp 48 51)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-   5) Stk [   3: NSupercomb sn
-             52: NAp    3   49 (NAp 48 51)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-~~~
-Dopo un certo numero di applicazioni, troviamo il supercombinator sn a cui applichiamo *scStep*, questo aspetta un input che sarà il nodo (49) e crea l'applicazione (p K1) che è innestata in questo modo: (p K1) K, nei prossimi step "aprirà" il costrutto p.
-~~~
-  1)  Stk [  52: NAp   49    8 (NSupercomb K1)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  2)  Stk [  49: NAp   48   51 (NAp 50 49)
-             52: NAp   49    8 (NSupercomb K1)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  3)  Stk [  48: NAp    1   45 (NNum 3)
-             49: NAp   48   51 (NAp 50 49)
-             52: NAp   49    8 (NSupercomb K1)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  4)  Stk [   1: NSupercomb pair
-             48: NAp    1   45 (NNum 3)
-             49: NAp   48   51 (NAp 50 49)
-             52: NAp   49    8 (NSupercomb K1)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-~~~
-Dopo diverse chiamate di *apStep*, abbiamo raggiunto il costrutto pair che prenderà tre argomenti, x y f, rispettivamente i nodi (45) (51) (8), si applica *scStep*, il quale istanzia il body andando a creare l'applicazione (f x) y
-~~~
-  5)  Stk [  52: NAp   53   51 (NAp 50 49)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  6)  Stk [  53: NAp    8   45 (NNum 3)
-             52: NAp   53   51 (NAp 50 49)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  7)  Stk [   8: NSupercomb K1
-             53: NAp    8   45 (NNum 3)
-             52: NAp   53   51 (NAp 50 49)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-~~~
-Dopo diverse chiamate ad *apStep*, troviamo il supercominator K1, che si aspetta 2 parametri, *scStep* ne istanzia il body andando a sostituirgli il secondo parametro, ossia il nodo 51 con una indirezion, questo perché .
-~~~
-  8)  Stk [  52: NInd   51
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  9)  Stk [  51: NAp   50   49 (NAp 48 51)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  10) Stk [  50: NAp    1   47 (NNum 4)
-             51: NAp   50   49 (NAp 48 51)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  11) Stk [   1: NSupercomb pair
-             50: NAp    1   47 (NNum 4)
-             51: NAp   50   49 (NAp 48 51)
-              5: NAp   52    7 (NSupercomb K)
-            ]
-      
-  12) Stk [   5: NAp   54   49 (NAp 48 51)
-            ]
-      
-  13) Stk [  54: NAp    7   47 (NNum 4)
-              5: NAp   54   49 (NAp 48 51)
-            ]
-      
-  14) Stk [   7: NSupercomb K
-             54: NAp    7   47 (NNum 4)
-              5: NAp   54   49 (NAp 48 51)
-            ]
-      
-  15) Stk [   5: NInd   47
-            ]
-      
-  16) Stk [  47: NNum 4
-            ]
-~~~
 ### Case
 Questa implementazione non gestisce le Case expressions, dunque per gestire gli oggetti vengono utilizzati i costrutti if casePair e caseList, oggetti più generici invece non possono esssere gestiti.
 ### If
@@ -730,7 +690,7 @@ ora che l'applicazione è aperta si applica la definizione di *printCons* defini
              48: NAp   38   44 (NNum 5)
              40: NAp   48   49 (NAp 21 46)
             ]
-  ~~~
+~~~
   Ora che l'applicazione di *printCons* è stata 'aperta' applichiamo la primitiva *print* che metterà il numero in testa alla lista nell'output e metterà nello stack l'applicazione di *printList* sul resto della lista
   ~~~   
   20) Stk [  49: NAp   21   46 (NPrim Pack)
@@ -739,7 +699,7 @@ ora che l'applicazione è aperta si applica la definizione di *printCons* defini
   21) Stk [  21: NSupercomb printList
              49: NAp   21   46 (NPrim Pack)
             ]
-~~~
+  ~~~
 Come prima chiamiamo *scStep* per istanziare il body di *printList*  
 ~~~
   22) Stk [  49: NAp   51   22 (NSupercomb printCons)
@@ -759,7 +719,7 @@ Come prima chiamiamo *scStep* per istanziare il body di *printList*
              51: NAp   50   39 (NPrim stop)
              49: NAp   51   22 (NSupercomb printCons)
             ]
-   ~~~
+~~~
    Nuovamente ci troviamo con l'applicazione di *caseList* che però contiene una lista non ancora valutata (46) quindi si procede a mettere lo stack corrente nel dump e a valutare la lista
    ~~~
   26) Stk [  46: NPrim Pack
@@ -780,7 +740,7 @@ Come prima chiamiamo *scStep* per istanziare il body di *printList*
             ]
    ~~~
    Ora che la lista è valutata possiamo applicare *caseList*, visto che NData 1 0 corrisponde alla lista vuota viene messa in cima allo stack la primitiva *stop* che svuoterà lo stack mettendo così il programma in uno stato finale
-   ~~~  
+   ~~~
   30) Stk [  49: NPrim stop
             ]
       
@@ -788,12 +748,47 @@ Come prima chiamiamo *scStep* per istanziare il body di *printList*
 
 
 Main = 5
-~~~
+   ~~~
 Ecco il risultato dell'esecuzione, viene stampata la lista formata solo dal valore 5.
 ### Garbage Collector
 
 Il garbage collector ha il compito di eliminare i nodi che non vengono utilizzati ed è rappresentato dalla funzione *gc*, questa viene chiamata da *doAdmin* prima di fare uno step se l'heap contiene un numero di nodi troppo elevato.
-In pratica la funzione *gc* grazie ad altre funzioni ausiliare marchia i nodi che sono raggiungibili tramite stack, globals e dump e tutti i nodi raggiungibili da essi utilizzando delle chiamate ricorsive della funzione, una volta fatta questa operazione viene applicata la funzione *hFree* su tutti i nodi non marchiati.
+In pratica la funzione *gc* grazie ad altre funzioni ausiliare marchia i nodi che sono raggiungibili tramite stack, globals e dump e tutti i nodi raggiungibili da essi utilizzando delle chiamate ricorsive della funzione, una volta fatta questa operazione viene applicata la funzione *scanHeap* che utilizzando *hFree* dealloca tutti i nodi non marchiati e toglie il marchio ai nodi restanti.
 
-Il problema di questa implementazione è il fatto che se tutti i nodi dello heap sono collegati allora per poter marchiare tutti i nodi occorre avere uno stack grande quanto l'heap, per questo motivo abbiamo sostituito la funzione di marking con una macchina a stati che invece di utilizzare la ricorsione per tornare al nodo precedente usa dei veri e propri puntatori al nodo corrente e al nodo precedente, questa macchina a stati è implementata dalla funzione *markStateMachine* e compie una azione specifica a seconda del nodo corrente e del nodo precedente. 
+Il problema di questa implementazione è il fatto che se tutti i nodi dello heap sono collegati allora per poter marchiare tutti i nodi occorre avere uno stack grande quanto l'heap, per questo motivo abbiamo sostituito la funzione di marking con una macchina a stati che invece di utilizzare la ricorsione per tornare al nodo precedente usa dei veri e propri puntatori al nodo corrente e al nodo precedente, questa macchina a stati è implementata dalla funzione *markStateMachine* e compie una azione specifica a seconda del nodo corrente e del nodo precedente.
+
+La macchina a stati ha tre componenti (f, b, h) rispettivamente il puntatore al nodo successivo, il puntatore al nodo precedente e l'heap. Lo stato iniziale della macchina sarà lo stato:
+~~~
+(f, hNull, h_init)
+~~~
+La macchina terminerà all'incontro dello stato:
+~~~
+(f, hNull, h[f: NMarked Done n])
+~~~
+Ovvero quando si incontra un nodo marchiato e non vi è alcun nodo a cui tornare.
+Per descrivere il funzionamento di questa macchina useremo come esempio il suo funzionamento sui nodi *NAp*, in quanto insieme con i nodi *NData* sono gli unici ad avere sottografi, questi ultimi sono leggermente più complessi da gestire ma il funzionamento è molto simile.
+Quando si trova un nodo di applicazione non marchiato scenderemo nel sottografo corrisponedente al suo primo parametro, memorizzando il puntatore al nodo precedente al posto del parametro stesso. Il nuovo f punterà al sottografo mentre il nuovo b punterà al nodo corrente che verrà marchiato come *NMarked (Visits 1) NAp b a2*, questa situazione corrisponde alla chiamata:
+~~~ haskell
+(NAp a1 a2, _) -> markStateMachine a1 f (hUpdate h f (NMarked (Visits 1) (NAp b a2)))
+~~~
+Quando la macchina trova che f punta a un nodo marchiato ispeziona il nodo precedente, se corrisponde ad hNull allora la macchina termina, altrimenti dev'essere un *NAp* marchiato. Se questo nodo ha Visits a 1 significa che il suo primo sottografo è stato completamente marchiato quindi è il momento di marchiare il secondo sottografo, questo viene fatto facendo puntare f ad esso, lasciando b invariato, spostando il puntatore al nodo prededente al secondo campo del *NAp* e mettendo il parametro Visits a 2, questo viene fatto in questa chiamata:
+
+~~~ haskell
+case back_node of 
+          (NMarked (Visits 1) (NAp b' a2)) -> markStateMachine a2 b (hUpdate h b (NMarked (Visits 2) (NAp f b')))
+~~~
+Quando il marking del secondo grafo è completo potremo ripristinare gli indirizzi all'interno del *NAp* e segnare come Done il nodo, questo viene fatto in questa chiamata:
+
+~~~ haskell
+case back_node of 
+        NMarked (Visits 2) (NAp a1 b')) -> markStateMachine b b' (hUpdate h b (NMarked (Done) (NAp a1 f)))
+~~~
+
+Di seguito mostriamo un esempio grafico del funzionamento del marking:
+
+![gc](/home/davide/Documenti/FLImplementation/imgs/gc.png)
+
+Quando si incontra un nodo *NData* il procedimento è simile, invece di avere sempre e comunque due sottografi essi ne hanno un numero variabile che dipende dal numero di argomenti del nodo stesso, dunque in questo caso il parametro Visits viene utilizzato per ricordare quanti sottografi sono già stati marchiati e capire quindi qual'è il prossimo sottografo dove 'scendere'.
+
+
 Questa implementazione ha reso necessario aggiungere il campo Visits al nodo NMarked che ricorda il numero di visite al nodo e che viene messo a Done quando tutti i nodi raggiungibili da esso sono stati marchiati.
