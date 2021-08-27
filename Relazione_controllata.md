@@ -413,10 +413,14 @@ Dopo diverse chiamate ad *apStep*, troviamo il supercominator K, che si aspetta 
             ]
 ~~~
 
-### Case
-Questa implementazione non gestisce le Case expressions, dunque per gestire gli oggetti vengono utilizzati i costrutti if casePair e caseList, oggetti più generici invece non possono esssere gestiti.
-### If
+## Strutture dati
+Le strutture dati vengono costruite utilizzando Pack{t,a} dove t è la tag mentre a è il numero di argomenti, questo costrutto è stato rappresentato con la primitiva *PrimConstr t a* quindi possiamo istanziare una espressione EConstr nell'heap come *NPrim "Pack" (PrimConstr t a)*. Abbiamo quindi aggiunto un caso a *primStep* per poter gestire la nuova primitiva che utilzza la funzione ausiliaria *primConstr* che si occupa di controllare se al costruttore vengono dati abbastanza argomenti, se questo è vero allora viene istanziato un oggetto nell'heap che sarà rappresentato dal tipo di nodo NDdata che conterrà il tag e l'indirizzo dei vari argomenti.
 
+Per rappresentare True e False abbiamo utilizzato rispettivamente Pack{2,0} e Pack{1,0} inserendo le definizioni in *extraPreludeDefs*.
+
+Questa implementazione non gestisce le Case expressions, dunque per gestire gli oggetti vengono utilizzati i costrutti casePair e caseList, oggetti più generici invece non possono esssere gestiti.
+### If
+Vediamo di seguito l'esecuzione di un programma dove viene coinvolto il costrutto *if*, il programma è il seguente: *main = if 1 > 2 5 6*
 ~~~
    1) Stk [   1: NSupercomb main
             ]
@@ -439,7 +443,7 @@ Questa implementazione non gestisce le Case expressions, dunque per gestire gli 
               1: NAp   47   48 (NNum 6)
             ]
 ~~~
-Possiamo vedere che sulla cima dello stack ci sia l'indirizzo della primitiva If, quindi viene chiamata la funzione *primIf*, questa si aspetta tre argomenti, come quelli presenti nello stack: 44, 46, 48, che sono rispettivamente la condizione dell'if, il ramo del then e quello dell'else. La funzione *primIf* vedendo che la condizione (44) non è stata valutata, sposta lo stack corrente nel dump e inserisce nello stack vuoto l'indirizzo della condizione da valutare.
+Possiamo vedere che sulla cima dello stack c'è l'indirizzo della primitiva If, quindi viene chiamata la funzione *primIf*, questa si aspetta tre argomenti, come quelli presenti nello stack: (44), (46), (48), che sono rispettivamente la condizione dell'if, il ramo del then e quello dell'else. La funzione *primIf* vedendo che la condizione (44) non è stata valutata, sposta lo stack corrente nel dump e inserisce nello stack vuoto l'indirizzo della condizione da valutare.
 ~~~
     
    6) Stk [  44: NAp   42   43 (NNum 2)
@@ -466,21 +470,20 @@ Possiamo vedere che sulla cima dello stack ci sia l'indirizzo della primitiva >,
               1: NAp   47   48 (NNum 6)
             ]
 ~~~
-Ora che la condizione è stata valutata si può eseguire l'if e dato che la condizione è falsa si tolgono gli indirizzi dell'if e si inserisce quello del ramo dell'else, ossia il numero 6.
+Ora che la condizione è stata valutata si può eseguire l'if e dato che la condizione è falsa aggiorna il nodo radice con il nodo del ramo dell'else, ossia il numero 6.
 ~~~
       
   11) Stk [  1: NNum 6
             ]
 ~~~
-
-## Strutture dati
-Le strutture dati vengono costruite utilizzando Pack{t,a} dove t è la tag mentre a è il numero di argomenti, questo costrutto è stato rappresentato con la primitiva *PrimConstr t a* quindi possiamo istanziare una espressione EConstr nell'heap come *NPrim "Pack" (PrimConstr t a)*. Abbiamo quindi aggiunto un caso a *primStep* per poter gestire la nuova primitiva che utilzza la funzione ausiliaria *primConstr* che si occupa di controllare se al costruttore vengono dati abbastanza argomenti, se questo è vero allora viene istanziato un oggetto nell'heap che sarà rappresentato dal tipo di nodo NDdata che conterrà il tag e l'indirizzo dei vari argomenti.
-
-Per rappresentare True e False abbiamo utilizzato rispettivamente Pack{2,0} e Pack{1,0} inserendo le definizioni in *extraPreludeDefs*.
-
 ### Coppie
 
-Per gestire le coppie utilizziamo la costruzione Pack{1,2}, questo porterà alla costruzione di un NData che contiene il tag 1 e 2 indirizzi, per poter estrarre un nodo dalla coppia utilizziamo *casePair*, costruita come una primitiva questa funzione prende una coppia e vi applica una funzione ausiliaria. per ottenere il primo elemento della coppia basterà scrivere casepair p K dove p è una coppia (K è una funziona che dati due argomenti restituisce solo il primo).
+Per gestire le coppie utilizziamo la costruzione Pack{1,2}, questo porterà alla costruzione di un NData che contiene il tag 1 e 2 indirizzi, per poter estrarre un nodo dalla coppia utilizziamo *casePair*, costruita come una primitiva questa funzione prende una coppia e vi applica una funzione ausiliaria. Per esempio per ottenere il primo elemento della coppia basterà scrivere *casepair p K* dove p è una coppia e K è una funziona che dati due argomenti restituisce solo il primo.
+La definizione di *casePair* è:
+
+~~~ haskell
+casePair (Pack{1,2} a b) f = f a b
+~~~
 
 Di seguito mostriamo l'esecuzione del programma "main = let p = Pack{1,2} 4 5 in casePair p K"
 ~~~
@@ -488,19 +491,19 @@ Di seguito mostriamo l'esecuzione del programma "main = let p = Pack{1,2} 4 5 in
    1) Stk [   1: NSupercomb main
             ]
 ~~~
-Viene istanziato il body del supercombinator main con il comando scStep, viene quindi istanziata la definizione Pack{1,2} 4 5 del let e viene sostituito il nodo radice con il nodo corrispondente al body del let.
+Viene istanziato il body del supercombinator main con il comando *scStep*, viene quindi istanziata la definizione Pack{1,2} 4 5 del let e viene sostituito il nodo radice con il nodo corrispondente al body del let.
 ~~~
       
    2) Stk [   1: NAp   46    3 (NSupercomb K)
             ]
 ~~~
-Viene applicato apStep
+Viene applicato *apStep*
 ~~~
    3) Stk [  46: NAp   35   45 (NAp 43 44)
               1: NAp   46    3 (NSupercomb K)
             ]
 ~~~
-Viene applicato nuovamente apStep
+Viene applicato nuovamente *apStep*
 ~~~
       
    4) Stk [  35: NPrim casePair
@@ -508,7 +511,7 @@ Viene applicato nuovamente apStep
               1: NAp   46    3 (NSupercomb K)
             ]
 ~~~
-Visto che in cima allo stack si trova una primitiva viene chiamato *primStep* che utilizzerà *primCasePair* la quale proverà ad applicare la funzione in (3) a (45) ma in questo caso l'espressione (45) non è ancora stata valutata quindi lo stack viene spostato nel dump e si mette nello stack l'esperssione da valutare.
+Visto che in cima allo stack si trova una primitiva viene chiamato *primStep* che utilizzerà *primCasePair* la quale proverà ad applicare la funzione in (3) a (45) ma in questo caso l'espressione (45) non è ancora stata valutata quindi lo stack viene spostato nel dump e si mette nello stack l'espressione da valutare.
 ~~~
       
    5) Stk [  45: NAp   43   44 (NNum 5)
@@ -523,7 +526,7 @@ Visto che in cima allo stack si trova una primitiva viene chiamato *primStep* ch
              45: NAp   43   44 (NNum 5)
             ]
 ~~~
-A questo punto troviamo la primitiva pack in cima allo stack quindi viene chiamata la funzione *primConstr* che prenderà attraverso *getargs* gli argomenti a indirizzo (42) e (44) e costruirà un NData con tag 1 e contenente una lista di 2 argomenti
+Dopo una serie di applicazioni troviamo la primitiva pack in cima allo stack quindi viene chiamata la funzione *primConstr* che prenderà attraverso *getargs* gli argomenti a indirizzo (42) e (44) e costruirà un NData con tag 1 e contenente una lista di 2 argomenti
 ~~~
 
    8) Stk [  45: NData 1 2
@@ -542,7 +545,7 @@ Visto che in cima allo stack c'è un NData l'espressione è stata completamente 
             ]
 
 ~~~
-Questa volta *casePair* troverà la coppia valutata quindi potrà applicare la funzione K a (4,5)
+Questa volta *casePair* troverà la coppia valutata quindi potrà applicare la funzione K ai numeri 4 e 5
 ~~~      
 
   11) Stk [   1: NAp   47   44 (NNum 5)
@@ -557,13 +560,10 @@ Questa volta *casePair* troverà la coppia valutata quindi potrà applicare la f
               1: NAp   47   44 (NNum 5)
             ]
 ~~~
-K è un supercombinator, in questo caso è una funzione definita nel Prelude, quindi viene utilizzata *scStep*
+K è un supercombinator, in questo caso è una funzione definita nel Prelude e viene utilizzata *scStep*
 ~~~
       
-  14) Stk [   1: NInd   42
-            ]
-      
-  15) Stk [  42: NNum 4
+  14) Stk [  1: NNum 4
             ]
 
 ~~~
@@ -577,7 +577,7 @@ Utilizziamo una definizione ricorsiva delle liste:
 list * ::= Nil | Cons * (list *)
 ~~~
 
-*Nil* corrisponderà a Pack{1,0} mentre *Cons* corrisponderà a Pack{2,2}, ora per gestire questo tipo di lista implementiamo una nuova primitiva ovvero *caseList* che ha il compito di ritornare un caso base quando ha in input una lista vuota (Nil) altrimenti applicare una funzione ausiliaria sugli elementi della lista. anche *caseList* è stata implementata come una primitiva.
+*Nil* corrisponderà a Pack{1,0} mentre *Cons* corrisponderà a Pack{2,2}, ora per gestire questo tipo di lista implementiamo una nuova primitiva, ovvero *caseList*, che ha il compito di ritornare un caso base quando ha in input una lista vuota (Nil), altrimenti applicare una funzione ausiliaria sugli elementi della lista. Anche *caseList* è stata implementata come una primitiva.
 
 ~~~
 caseList Pack{1,0} cn cc = cn
@@ -588,12 +588,14 @@ Per poter ottenere una lista come output di un programma è stato necessario far
 Per ottenere questa stampa sono state implementate le primitiva stop, che si occupa di mettere TiState in una configurazione finale quando la lista è stata stampata, e print che si occupa di mettere il valore corrente nell'output.
 Queste due funzioni vengono utilizzate in questo modo per poter stampare l'intera lista risultante:
 
-~~~
+~~~ haskell
 printList xs = caseList xs stop printCons
 printCons h t = print h (printList t)
 ~~~
 
-Per fare si che il risultato possa essere stampato è il compilatore deve essere modificato in modo che lo stack iniziale non contenga più solo il main ma l'applicazione (printList main).
+Per fare si che il risultato possa essere stampato il compilatore deve essere modificato in modo che lo stack iniziale non contenga più solo il main ma l'applicazione *printList main*.
+
+Portiamo com esempio l'esecuzione del programma *main = Pack{2,2} 5 Pack{1,0}*
 
 ~~~
    1) Stk [  40: NAp   21    1 (NSupercomb main)
@@ -661,7 +663,7 @@ Ora che il main è stato valutato, possiamo riprendere dal dump lo stack precede
              40: NAp   42   22 (NSupercomb printCons)
             ]
 ~~~
-Ora ci troviamo nella stessa situazione incontrata nello step 6, solo che ora il nodo 1 è valutato quindi si può applicare la regola di caseList chiamando *primCaseList* che visto che la lista non è vuota applica *printCons* alla lista creando l'applizazione e mettendola nello stack
+Ora ci troviamo nella stessa situazione incontrata nello step 6, solo che ora il nodo 1 è valutato quindi si può applicare la regola di caseList chiamando *primCaseList* che visto che la lista non è vuota applica *printCons* alla lista creando l'applizazione e mettendola nello stack. 
 ~~~
   14) Stk [  40: NAp   47   46 (NPrim Pack)
             ]
@@ -753,7 +755,8 @@ Ecco il risultato dell'esecuzione, viene stampata la lista formata solo dal valo
 ### Garbage Collector
 
 Il garbage collector ha il compito di eliminare i nodi che non vengono utilizzati ed è rappresentato dalla funzione *gc*, questa viene chiamata da *doAdmin* prima di fare uno step se l'heap contiene un numero di nodi troppo elevato.
-In pratica la funzione *gc* grazie ad altre funzioni ausiliare marchia i nodi che sono raggiungibili tramite stack, globals e dump e tutti i nodi raggiungibili da essi utilizzando delle chiamate ricorsive della funzione, una volta fatta questa operazione viene applicata la funzione *scanHeap* che utilizzando *hFree* dealloca tutti i nodi non marchiati e toglie il marchio ai nodi restanti.
+In pratica la funzione *gc* grazie ad altre funzioni ausiliare marchia i nodi che sono raggiungibili tramite stack, globals e dump e tutti i nodi raggiungibili da essi utilizzando delle chiamate ricorsive della funzione. 
+Una volta fatta questa operazione viene applicata la funzione *scanHeap* che utilizzando *hFree* dealloca tutti i nodi non marchiati e toglie il marchio ai nodi restanti.
 
 Il problema di questa implementazione è il fatto che se tutti i nodi dello heap sono collegati allora per poter marchiare tutti i nodi occorre avere uno stack grande quanto l'heap, per questo motivo abbiamo sostituito la funzione di marking con una macchina a stati che invece di utilizzare la ricorsione per tornare al nodo precedente usa dei veri e propri puntatori al nodo corrente e al nodo precedente, questa macchina a stati è implementata dalla funzione *markStateMachine* e compie una azione specifica a seconda del nodo corrente e del nodo precedente.
 
@@ -766,12 +769,12 @@ La macchina terminerà all'incontro dello stato:
 (f, hNull, h[f: NMarked Done n])
 ~~~
 Ovvero quando si incontra un nodo marchiato e non vi è alcun nodo a cui tornare.
-Per descrivere il funzionamento di questa macchina useremo come esempio il suo funzionamento sui nodi *NAp*, in quanto insieme con i nodi *NData* sono gli unici ad avere sottografi, questi ultimi sono leggermente più complessi da gestire ma il funzionamento è molto simile.
-Quando si trova un nodo di applicazione non marchiato scenderemo nel sottografo corrisponedente al suo primo parametro, memorizzando il puntatore al nodo precedente al posto del parametro stesso. Il nuovo f punterà al sottografo mentre il nuovo b punterà al nodo corrente che verrà marchiato come *NMarked (Visits 1) NAp b a2*, questa situazione corrisponde alla chiamata:
+Per descrivere il funzionamento di questa macchina useremo come esempio il suo funzionamento sui nodi *NAp*, in quanto assieme ai nodi *NData* sono gli unici ad avere sottografi, questi ultimi sono leggermente più complessi da gestire ma il funzionamento è molto simile.
+Quando si trova un nodo *NAp* non marchiato scenderemo nel sottografo corrisponedente al suo primo parametro, memorizzando il puntatore al nodo precedente al posto del parametro stesso. Il nuovo f punterà al sottografo mentre il nuovo b punterà al nodo corrente che verrà marchiato come *NMarked (Visits 1) NAp b a2*, questa situazione corrisponde alla chiamata:
 ~~~ haskell
 (NAp a1 a2, _) -> markStateMachine a1 f (hUpdate h f (NMarked (Visits 1) (NAp b a2)))
 ~~~
-Quando la macchina trova che f punta a un nodo marchiato ispeziona il nodo precedente, se corrisponde ad hNull allora la macchina termina, altrimenti dev'essere un *NAp* marchiato. Se questo nodo ha Visits a 1 significa che il suo primo sottografo è stato completamente marchiato quindi è il momento di marchiare il secondo sottografo, questo viene fatto facendo puntare f ad esso, lasciando b invariato, spostando il puntatore al nodo prededente al secondo campo del *NAp* e mettendo il parametro Visits a 2, questo viene fatto in questa chiamata:
+Quando la macchina trova che f punta ad un nodo marchiato ispeziona il nodo precedente, se corrisponde ad hNull allora la macchina termina, altrimenti dev'essere un *NAp* marchiato. Se questo nodo ha Visits a 1 significa che il suo primo sottografo è stato completamente marchiato quindi è il momento di marchiare il secondo sottografo, questo viene fatto facendo puntare f ad esso, lasciando b invariato, spostando il puntatore al nodo prededente al secondo campo del *NAp* e mettendo il parametro Visits a 2, questo viene fatto in questa chiamata:
 
 ~~~ haskell
 case back_node of 
@@ -789,6 +792,5 @@ Di seguito mostriamo un esempio grafico del funzionamento del marking:
 ![gc](/home/davide/Documenti/FLImplementation/imgs/gc.png)
 
 Quando si incontra un nodo *NData* il procedimento è simile, invece di avere sempre e comunque due sottografi essi ne hanno un numero variabile che dipende dal numero di argomenti del nodo stesso, dunque in questo caso il parametro Visits viene utilizzato per ricordare quanti sottografi sono già stati marchiati e capire quindi qual'è il prossimo sottografo dove 'scendere'.
-
 
 Questa implementazione ha reso necessario aggiungere il campo Visits al nodo NMarked che ricorda il numero di visite al nodo e che viene messo a Done quando tutti i nodi raggiungibili da esso sono stati marchiati.
